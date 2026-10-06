@@ -1,0 +1,37 @@
+"use client";
+
+import { useActionState } from "react";
+
+import { depositFunds } from "@/app/actions";
+import { IDLE_ACTION_STATE } from "@/lib/action-state";
+
+export function FundWalletForm() {
+  const [state, formAction, pending] = useActionState(depositFunds, IDLE_ACTION_STATE);
+
+  return (
+    <form action={formAction} className="flex items-end gap-3">
+      <label className="flex-1 text-sm text-[#5d736a]">
+        Add funds
+        <input
+          name="amount"
+          required
+          inputMode="decimal"
+          placeholder="100.00"
+          className="mt-1 w-full rounded-xl border border-[#dfece5] bg-white px-3 py-2 text-sm text-[#18352d]"
+        />
+      </label>
+      <button
+        type="submit"
+        disabled={pending}
+        className="rounded-full border border-[#1e4d3d] px-5 py-2 text-sm font-semibold text-[#1e4d3d] transition hover:bg-[#1e4d3d] hover:text-white disabled:cursor-not-allowed disabled:opacity-60"
+      >
+        {pending ? "Adding..." : "Add funds"}
+      </button>
+      {state.error ? (
+        <p role="alert" className="text-sm text-[#8a5a12]">
+          {state.error}
+        </p>
+      ) : null}
+    </form>
+  );
+}

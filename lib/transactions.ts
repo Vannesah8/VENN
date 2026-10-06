@@ -13,7 +13,7 @@ import {
   fundsHeld,
   resolveParty,
 } from "@/lib/escrow";
-import { getDatabase, type Db } from "@/lib/db";
+import { getDatabase, type DbLike } from "@/lib/db";
 import {
   depositToWallet,
   getLedgerBalance,
@@ -23,6 +23,13 @@ import {
   walletAccountId,
   type LedgerEntryView,
 } from "@/lib/ledger";
+import { enqueueTransitionNotifications } from "@/lib/notifications";
+import {
+  DEFAULT_CURRENCY,
+  DEFAULT_LANG,
+  type Currency,
+  type Lang,
+} from "@/lib/i18n";
 
 export interface User {
   id: string;
@@ -30,6 +37,9 @@ export interface User {
   role: EscrowRole;
   email: string | null;
   passwordHash: string | null;
+  phone: string | null;
+  lang: Lang;
+  currency: Currency;
 }
 
 export interface TransactionView extends EscrowTransaction {
@@ -71,6 +81,22 @@ interface EventRow {
   created_at: string;
 }
 
+interface UserRow {
+  id: string;
+  display_name: string;
+  role: EscrowRole;
+  email: string | null;
+  password_hash: string | null;
+  phone: string | null;
+  lang: string;
+  currency: string;
+}
+
+export interface TransactionPage {
+  transactions: TransactionView[];
+  nextCursor: string | null;
+}
+
 const TRANSACTION_COLUMNS = `
   t.id, t.buyer_id, t.seller_id, t.carrier_id, t.item_name, t.amount_cents, t.status,
   t.tracking_number, t.carrier_name, t.origin, t.destination, t.dispute_reason,
@@ -82,6 +108,24 @@ const TRANSACTION_VIEW_JOINS = `
   LEFT JOIN users seller ON seller.id = t.seller_id
   LEFT JOIN users carrier_user ON carrier_user.id = t.carrier_id
 `;
+
+function toUser(row: UserRow): User {
+  const isLang = (value: unknown): value is Lang =>
+    value === "en" || value === "sw";
+  const isCurrency = (value: unknown): value is Currency =>
+    value === "KES" || value === "TZS" || value === "UGX";
+
+  return {
+    id: row.id,
+    displayName: row.display_name,
+    role: row.role,
+    email: row.email,
+    passwordHash: row.password_hash,
+    phone: row.phone,
+    lang: isLang(row.lang) ? row.lang : DEFAULT_LANG,
+    currency: isCurrency(row.currency) ? row.currency : DEFAULT_CURRENCY,
+  };
+}
 
 function toTransaction(row: TransactionRow): EscrowTransaction {
   return {
@@ -126,91 +170,98 @@ function toEvent(row: EventRow): EscrowEvent {
   };
 }
 
-export function getUser(id: string, db: Db = getDatabase()): User | null {
-  const row = db
-    .prepare(
-      "SELECT id, display_name, role, email, password_hash FROM users WHERE id = ?",
-    )
-    .get(id) as
-    | { id: string; display_name: string; role: EscrowRole; email: string | null; password_hash: string | null }
-    | undefined;
+export async function getUser(
+  id: string,
+  db: DbLike = getDatabase(),
+): Promise<User | null> {
+  const d = await db;
+  const row = await d.get<UserRow>(
+    "SELECT id, display_name, role, email, password_hash, phone, lang, currency FROM users WHERE id = ?",
+    [id],
+  );
 
-  return row
-    ? {
-        id: row.id,
-        displayName: row.display_name,
-        role: row.role,
-        email: row.email,
-        passwordHash: row.password_hash,
-      }
-    : null;
+  return row ? toUser(row) : null;
 }
 
-export function getUserByEmail(email: string, db: Db = getDatabase()): User | null {
-  const row = db
-    .prepare(
-      "SELECT id, display_name, role, email, password_hash FROM users WHERE email = ?",
-    )
-    .get(email) as
-    | { id: string; display_name: string; role: EscrowRole; email: string | null; password_hash: string | null }
-    | undefined;
+export async function getUserByEmail(
+  email: string,
+  db: DbLike = getDatabase(),
+): Promise<User | null> {
+  const d = await db;
+  const row = await d.get<UserRow>(
+    "SELECT id, display_name, role, email, password_hash, phone, lang, currency FROM users WHERE email = ?",
+    [email.toLowerCase()],
+  );
 
-  return row
-    ? {
-        id: row.id,
-        displayName: row.display_name,
-        role: row.role,
-        email: row.email,
-        passwordHash: row.password_hash,
-      }
-    : null;
+  return row ? toUser(row) : null;
 }
 
-export function listUsers(db: Db = getDatabase()): User[] {
-  const rows = db
-    .prepare(
-      "SELECT id, display_name, role, email, password_hash FROM users ORDER BY role, display_name",
-    )
-    .all() as Array<{
-    id: string;
-    display_name: string;
-    role: EscrowRole;
-    email: string | null;
-    password_hash: string | null;
-  }>;
+export async function getUserByPhone(
+  phone: string,
+  db: DbLike = getDatabase(),
+): Promise<User | null> {
+  const d = await db;
+  const row = await d.get<UserRow>(
+    "SELECT id, display_name, role, email, password_hash, phone, lang, currency FROM users WHERE phone = ?",
+    [phone],
+  );
 
-  return rows.map((row) => ({
-    id: row.id,
-    displayName: row.display_name,
-    role: row.role,
-    email: row.email,
-    passwordHash: row.password_hash,
-  }));
+  return row ? toUser(row) : null;
+}
+
+export async function listUsers(db: DbLike = getDatabase()): Promise<User[]> {
+  const d = await db;
+  const rows = await d.all<UserRow>(
+    "SELECT id, display_name, role, email, password_hash, phone, lang, currency FROM users ORDER BY role, display_name",
+  );
+
+  return rows.map(toUser);
 }
 
 export function createUserId(): string {
   return `usr_${crypto.randomUUID().replace(/-/g, "").slice(0, 16)}`;
 }
 
-export function createUser(
-  input: { id: string; displayName: string; role: EscrowRole; email: string; passwordHash: string },
-  db: Db = getDatabase(),
-): User {
-  db.prepare(
-    `INSERT INTO users (id, display_name, role, email, password_hash, created_at)
-     VALUES (?, ?, ?, ?, ?, ?)
+export async function createUser(
+  input: {
+    id: string;
+    displayName: string;
+    role: EscrowRole;
+    email: string;
+    passwordHash: string | null;
+    phone?: string | null;
+    lang?: Lang;
+    currency?: Currency;
+  },
+  db: DbLike = getDatabase(),
+): Promise<User> {
+  const d = await db;
+  const phone = input.phone ?? null;
+  const lang = input.lang ?? DEFAULT_LANG;
+  const currency = input.currency ?? DEFAULT_CURRENCY;
+
+  await d.run(
+    `INSERT INTO users (id, display_name, role, email, password_hash, phone, lang, currency, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
      ON CONFLICT(id) DO UPDATE SET
        display_name = excluded.display_name,
        role = excluded.role,
        email = excluded.email,
-       password_hash = excluded.password_hash`,
-  ).run(
-    input.id,
-    input.displayName,
-    input.role,
-    input.email,
-    input.passwordHash,
-    new Date().toISOString(),
+       password_hash = excluded.password_hash,
+       phone = excluded.phone,
+       lang = excluded.lang,
+       currency = excluded.currency`,
+    [
+      input.id,
+      input.displayName,
+      input.role,
+      input.email,
+      input.passwordHash,
+      phone,
+      lang,
+      currency,
+      new Date().toISOString(),
+    ],
   );
 
   return {
@@ -219,100 +270,191 @@ export function createUser(
     role: input.role,
     email: input.email,
     passwordHash: input.passwordHash,
+    phone,
+    lang,
+    currency,
   };
 }
 
-export function getTransactionById(id: string, db: Db = getDatabase()): EscrowTransaction | null {
-  const row = db
-    .prepare(`SELECT ${TRANSACTION_COLUMNS} FROM transactions t WHERE t.id = ?`)
-    .get(id) as TransactionRow | undefined;
+export async function updateUserPrefs(
+  userId: string,
+  prefs: { lang: Lang; currency: Currency },
+  db: DbLike = getDatabase(),
+): Promise<void> {
+  const d = await db;
+  await d.run("UPDATE users SET lang = ?, currency = ? WHERE id = ?", [
+    prefs.lang,
+    prefs.currency,
+    userId,
+  ]);
+}
+
+export async function getTransactionById(
+  id: string,
+  db: DbLike = getDatabase(),
+): Promise<EscrowTransaction | null> {
+  const d = await db;
+  const row = await d.get<TransactionRow>(
+    `SELECT ${TRANSACTION_COLUMNS} FROM transactions t WHERE t.id = ?`,
+    [id],
+  );
 
   return row ? toTransaction(row) : null;
 }
 
-export function getTransactionViewById(
+export async function getTransactionViewById(
   id: string,
-  db: Db = getDatabase(),
-): TransactionView | null {
-  const row = db
-    .prepare(
-      `SELECT ${TRANSACTION_COLUMNS}, buyer.display_name AS buyer_name, seller.display_name AS seller_name, carrier_user.display_name AS carrier_user_name
-       FROM transactions t
-       ${TRANSACTION_VIEW_JOINS}
-       WHERE t.id = ?`,
-    )
-    .get(id) as TransactionRow | undefined;
+  db: DbLike = getDatabase(),
+): Promise<TransactionView | null> {
+  const d = await db;
+  const row = await d.get<TransactionRow>(
+    `SELECT ${TRANSACTION_COLUMNS}, buyer.display_name AS buyer_name, seller.display_name AS seller_name, carrier_user.display_name AS carrier_user_name
+     FROM transactions t
+     ${TRANSACTION_VIEW_JOINS}
+     WHERE t.id = ?`,
+    [id],
+  );
 
   return row ? toTransactionView(row) : null;
 }
 
-export function listTransactionsForActor(
+export async function listTransactionsForActor(
   actor: EscrowActor,
-  db: Db = getDatabase(),
-): TransactionView[] {
+  db: DbLike = getDatabase(),
+): Promise<TransactionView[]> {
+  const d = await db;
+
   if (actor.role === "mediator") {
-    return listAllTransactions(db);
+    return listAllTransactions(d);
   }
 
-  const rows = db
-    .prepare(
-      `SELECT ${TRANSACTION_COLUMNS}, buyer.display_name AS buyer_name, seller.display_name AS seller_name, carrier_user.display_name AS carrier_user_name
-       FROM transactions t
-       ${TRANSACTION_VIEW_JOINS}
-       WHERE t.buyer_id = @id OR t.seller_id = @id OR t.carrier_id = @id
-       ORDER BY t.updated_at DESC`,
-    )
-    .all({ id: actor.id }) as TransactionRow[];
+  const rows = await d.all<TransactionRow>(
+    `SELECT ${TRANSACTION_COLUMNS}, buyer.display_name AS buyer_name, seller.display_name AS seller_name, carrier_user.display_name AS carrier_user_name
+     FROM transactions t
+     ${TRANSACTION_VIEW_JOINS}
+     WHERE t.buyer_id = ? OR t.seller_id = ? OR t.carrier_id = ?
+     ORDER BY t.updated_at DESC`,
+    [actor.id, actor.id, actor.id],
+  );
 
   return rows.map(toTransactionView);
 }
 
-export function listAllTransactions(db: Db = getDatabase()): TransactionView[] {
-  const rows = db
-    .prepare(
-      `SELECT ${TRANSACTION_COLUMNS}, buyer.display_name AS buyer_name, seller.display_name AS seller_name, carrier_user.display_name AS carrier_user_name
-       FROM transactions t
-       ${TRANSACTION_VIEW_JOINS}
-       ORDER BY t.updated_at DESC`,
-    )
-    .all() as TransactionRow[];
+/**
+ * Keyset-paginated listing, ordered by (updated_at, id) so the cursor is
+ * unambiguous when several rows share an update timestamp.
+ */
+export async function pageTransactionsForActor(
+  actor: EscrowActor,
+  options: { cursor?: string | null; limit?: number } = {},
+  db: DbLike = getDatabase(),
+): Promise<TransactionPage> {
+  const d = await db;
+  const limit = Math.min(Math.max(options.limit ?? 20, 1), 100);
+  const cursor = options.cursor ?? null;
+
+  type Row = { updated_at: string; id: string };
+  let cursorFrom: Row | null = null;
+
+  if (cursor !== null) {
+    const separator = cursor.lastIndexOf("__");
+    cursorFrom = {
+      updated_at: cursor.slice(0, separator),
+      id: cursor.slice(separator + 2),
+    };
+  }
+
+  const isMediator = actor.role === "mediator";
+  const params: unknown[] = isMediator
+    ? []
+    : [actor.id, actor.id, actor.id];
+
+  let cursorClause = "";
+  if (cursorFrom) {
+    cursorClause = "AND (t.updated_at < ? OR (t.updated_at = ? AND t.id < ?))";
+    params.push(cursorFrom.updated_at, cursorFrom.updated_at, cursorFrom.id);
+  }
+
+  params.push(limit + 1);
+
+  const rows = isMediator
+    ? await d.all<TransactionRow>(
+        `SELECT ${TRANSACTION_COLUMNS}, buyer.display_name AS buyer_name, seller.display_name AS seller_name, carrier_user.display_name AS carrier_user_name
+         FROM transactions t
+         ${TRANSACTION_VIEW_JOINS}
+         WHERE 1 = 1 ${cursorClause}
+         ORDER BY t.updated_at DESC, t.id DESC
+         LIMIT ?`,
+        params,
+      )
+    : await d.all<TransactionRow>(
+        `SELECT ${TRANSACTION_COLUMNS}, buyer.display_name AS buyer_name, seller.display_name AS seller_name, carrier_user.display_name AS carrier_user_name
+         FROM transactions t
+         ${TRANSACTION_VIEW_JOINS}
+         WHERE (t.buyer_id = ? OR t.seller_id = ? OR t.carrier_id = ?) ${cursorClause}
+         ORDER BY t.updated_at DESC, t.id DESC
+         LIMIT ?`,
+        params,
+      );
+
+  const hasMore = rows.length > limit;
+  const page = rows.slice(0, limit);
+  const last = page.at(-1);
+  const nextCursor =
+    hasMore && last ? `${last.updated_at}__${last.id}` : null;
+
+  return { transactions: page.map(toTransactionView), nextCursor };
+}
+
+export async function listAllTransactions(
+  db: DbLike = getDatabase(),
+): Promise<TransactionView[]> {
+  const d = await db;
+  const rows = await d.all<TransactionRow>(
+    `SELECT ${TRANSACTION_COLUMNS}, buyer.display_name AS buyer_name, seller.display_name AS seller_name, carrier_user.display_name AS carrier_user_name
+     FROM transactions t
+     ${TRANSACTION_VIEW_JOINS}
+     ORDER BY t.updated_at DESC`,
+  );
 
   return rows.map(toTransactionView);
 }
 
-export function listEscrowEvents(
+export async function listEscrowEvents(
   transactionId: string,
-  db: Db = getDatabase(),
-): EscrowEvent[] {
-  const rows = db
-    .prepare(
-      "SELECT id, transaction_id, actor_id, actor_name, actor_role, action, from_status, to_status, note, created_at FROM escrow_events WHERE transaction_id = ? ORDER BY id ASC",
-    )
-    .all(transactionId) as EventRow[];
+  db: DbLike = getDatabase(),
+): Promise<EscrowEvent[]> {
+  const d = await db;
+  const rows = await d.all<EventRow>(
+    "SELECT id, transaction_id, actor_id, actor_name, actor_role, action, from_status, to_status, note, created_at FROM escrow_events WHERE transaction_id = ? ORDER BY id ASC",
+    [transactionId],
+  );
 
   return rows.map(toEvent);
 }
 
-export function createTransaction(
+export async function createTransaction(
   input: CreateTransactionInput,
   actor: EscrowActor,
-  db: Db = getDatabase(),
-): EscrowTransaction {
+  db: DbLike = getDatabase(),
+): Promise<EscrowTransaction> {
+  const d = await db;
+
   if (actor.role !== "buyer" && actor.role !== "mediator") {
     throw new EscrowError("forbidden", "Only a buyer can open an escrow transaction");
   }
 
   const buyerId = actor.role === "buyer" ? actor.id : input.buyerId;
 
-  if (getUser(input.sellerId, db) === null) {
+  if ((await getUser(input.sellerId, d)) === null) {
     throw new EscrowError("not_found", "Seller account not found");
   }
 
-  if (getUser(buyerId, db) === null) {
+  if ((await getUser(buyerId, d)) === null) {
     throw new EscrowError("not_found", "Buyer account not found");
   }
 
-  if (getLedgerBalance("wallet", buyerId, db) < input.amountCents) {
+  if ((await getLedgerBalance("wallet", buyerId, d)) < input.amountCents) {
     throw new EscrowError(
       "insufficient_funds",
       "The buyer wallet does not hold enough to fund this escrow",
@@ -322,40 +464,42 @@ export function createTransaction(
   const transaction = createEscrowTransaction({ ...input, buyerId });
   const now = new Date().toISOString();
 
-  db.transaction(() => {
-    db.prepare(
+  await d.tx(async () => {
+    await d.run(
       `INSERT INTO transactions (
          id, buyer_id, seller_id, carrier_id, item_name, amount_cents, status,
          tracking_number, carrier_name, origin, destination, dispute_reason, created_at, updated_at
        ) VALUES (
-         @id, @buyerId, @sellerId, NULL, @itemName, @amountCents, @status,
-         NULL, NULL, NULL, NULL, NULL, @now, @now
+         ?, ?, ?, NULL, ?, ?, ?,
+         NULL, NULL, NULL, NULL, NULL, ?, ?
        )`,
-    ).run({
-      id: transaction.id,
-      buyerId: transaction.buyerId,
-      sellerId: transaction.sellerId,
-      itemName: transaction.itemName,
-      amountCents: transaction.amountCents,
-      status: transaction.status,
-      now,
-    });
-
-    db.prepare(
-      `INSERT INTO escrow_events (
-         transaction_id, actor_id, actor_name, actor_role, action, from_status, to_status, note, created_at
-       ) VALUES (?, ?, ?, ?, 'created', NULL, ?, ?, ?)`,
-    ).run(
-      transaction.id,
-      actor.id,
-      actor.displayName,
-      actor.role,
-      transaction.status,
-      null,
-      now,
+      [
+        transaction.id,
+        transaction.buyerId,
+        transaction.sellerId,
+        transaction.itemName,
+        transaction.amountCents,
+        transaction.status,
+        now,
+        now,
+      ],
     );
 
-    moveLedgerFunds(
+    await d.run(
+      `INSERT INTO escrow_events (
+         transaction_id, actor_id, actor_name, actor_role, action, from_status, to_status, note, created_at
+       ) VALUES (?, ?, ?, ?, 'created', NULL, ?, NULL, ?)`,
+      [
+        transaction.id,
+        actor.id,
+        actor.displayName,
+        actor.role,
+        transaction.status,
+        now,
+      ],
+    );
+
+    await moveLedgerFunds(
       "wallet",
       buyerId,
       "escrow",
@@ -364,21 +508,25 @@ export function createTransaction(
       "escrow_deposit",
       transaction.id,
       `${transaction.itemName} placed in escrow`,
-      db,
+      d,
     );
-  })();
+
+    await enqueueTransitionNotifications(transaction, "created", d);
+  });
 
   return transaction;
 }
 
-export function applyActionToTransaction(
+export async function applyActionToTransaction(
   id: string,
   actor: EscrowActor,
   payload: EscrowActionPayload,
-  db: Db = getDatabase(),
-): EscrowTransaction {
-  return db.transaction(() => {
-    const current = getTransactionById(id, db);
+  db: DbLike = getDatabase(),
+): Promise<EscrowTransaction> {
+  const d = await db;
+
+  return d.tx(async () => {
+    const current = await getTransactionById(id, d);
 
     if (!current) {
       throw new EscrowError("not_found", "Transaction not found");
@@ -387,49 +535,51 @@ export function applyActionToTransaction(
     const updated = applyEscrowAction(current, actor, payload);
     const now = new Date().toISOString();
 
-    db.prepare(
+    await d.run(
       `UPDATE transactions
-       SET status = @status,
-           carrier_id = @carrierId,
-           tracking_number = @trackingNumber,
-           carrier_name = @carrierName,
-           origin = @origin,
-           destination = @destination,
-           dispute_reason = @disputeReason,
-           updated_at = @now
-       WHERE id = @id`,
-    ).run({
-      id: updated.id,
-      status: updated.status,
-      carrierId: updated.carrierId,
-      trackingNumber: updated.trackingNumber,
-      carrierName: updated.carrierName,
-      origin: updated.origin,
-      destination: updated.destination,
-      disputeReason: updated.disputeReason,
-      now,
-    });
+       SET status = ?,
+           carrier_id = ?,
+           tracking_number = ?,
+           carrier_name = ?,
+           origin = ?,
+           destination = ?,
+           dispute_reason = ?,
+           updated_at = ?
+       WHERE id = ?`,
+      [
+        updated.status,
+        updated.carrierId,
+        updated.trackingNumber,
+        updated.carrierName,
+        updated.origin,
+        updated.destination,
+        updated.disputeReason,
+        now,
+        updated.id,
+      ],
+    );
 
     const note = payload.action === "dispatch" ? null : (payload.input?.note ?? null);
 
-    db.prepare(
+    await d.run(
       `INSERT INTO escrow_events (
          transaction_id, actor_id, actor_name, actor_role, action, from_status, to_status, note, created_at
        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    ).run(
-      updated.id,
-      actor.id,
-      actor.displayName,
-      actor.role,
-      payload.action,
-      current.status,
-      updated.status,
-      note,
-      now,
+      [
+        updated.id,
+        actor.id,
+        actor.displayName,
+        actor.role,
+        payload.action,
+        current.status,
+        updated.status,
+        note,
+        now,
+      ],
     );
 
     if (current.status === "delivered" && updated.status === "released") {
-      moveLedgerFunds(
+      await moveLedgerFunds(
         "escrow",
         id,
         "wallet",
@@ -438,12 +588,14 @@ export function applyActionToTransaction(
         "escrow_release",
         id,
         `${current.itemName} escrow released to seller`,
-        db,
+        d,
       );
     }
 
+    await enqueueTransitionNotifications(updated, payload.action, d);
+
     return updated;
-  })();
+  });
 }
 
 export interface PortfolioStats {
@@ -456,9 +608,7 @@ export interface PortfolioStats {
   releasedCount: number;
 }
 
-export function getPortfolioStats(
-  transactions: EscrowTransaction[],
-): PortfolioStats {
+export function getPortfolioStats(transactions: EscrowTransaction[]): PortfolioStats {
   const stats: PortfolioStats = {
     totalCents: 0,
     heldCents: 0,
@@ -497,35 +647,41 @@ export function getPortfolioStats(
   return stats;
 }
 
-export function getWalletBalance(userId: string, db: Db = getDatabase()): number {
+export async function getWalletBalance(
+  userId: string,
+  db: DbLike = getDatabase(),
+): Promise<number> {
   return getLedgerBalance("wallet", userId, db);
 }
 
-export function listWalletEntries(userId: string, db: Db = getDatabase()): LedgerEntryView[] {
+export async function listWalletEntries(
+  userId: string,
+  db: DbLike = getDatabase(),
+): Promise<LedgerEntryView[]> {
   return listLedgerEntriesForAccount(walletAccountId(userId), db);
 }
 
-export function getEscrowLedgerEntries(
+export async function getEscrowLedgerEntries(
   transactionId: string,
-  db: Db = getDatabase(),
-): LedgerEntryView[] {
+  db: DbLike = getDatabase(),
+): Promise<LedgerEntryView[]> {
   return listLedgerEntriesForReference(transactionId, db);
 }
 
-export function getEscrowAccountBalance(
+export async function getEscrowAccountBalance(
   transactionId: string,
-  db: Db = getDatabase(),
-): number {
+  db: DbLike = getDatabase(),
+): Promise<number> {
   return getLedgerBalance("escrow", transactionId, db);
 }
 
-export function depositWalletFunds(
+export async function depositWalletFunds(
   userId: string,
   amountCents: number,
   note: string,
-  db: Db = getDatabase(),
-): void {
-  depositToWallet(userId, amountCents, note, db);
+  db: DbLike = getDatabase(),
+): Promise<void> {
+  await depositToWallet(userId, amountCents, note, db);
 }
 
 export { walletAccountId };

@@ -1,67 +1,62 @@
 import type { EscrowParty, EscrowRole, EscrowStatus } from "@/lib/escrow";
 import { getEscrowStatusLabel, getEscrowStatusTone } from "@/lib/escrow";
+import {
+  DEFAULT_PREFS,
+  localeFor,
+  t,
+  type Lang,
+  type LocalePrefs,
+  type MessageKey,
+} from "@/lib/i18n";
 
-const currencyFormatter = new Intl.NumberFormat("en-US", {
-  style: "currency",
-  currency: "USD",
-});
-
-const signedCurrencyFormatter = new Intl.NumberFormat("en-US", {
-  style: "currency",
-  currency: "USD",
-  signDisplay: "always",
-});
-
-const dateFormatter = new Intl.DateTimeFormat("en-US", {
-  dateStyle: "medium",
-  timeStyle: "short",
-  timeZone: "UTC",
-});
-
-export function formatCents(cents: number): string {
-  return currencyFormatter.format(cents / 100);
+export function formatCents(
+  cents: number,
+  prefs: LocalePrefs = DEFAULT_PREFS,
+): string {
+  return new Intl.NumberFormat(localeFor(prefs.lang, prefs.currency), {
+    style: "currency",
+    currency: prefs.currency,
+    maximumFractionDigits: prefs.currency === "UGX" ? 0 : 2,
+  }).format(cents / 100);
 }
 
-export function formatSignedCents(cents: number): string {
-  return signedCurrencyFormatter.format(cents / 100);
+export function formatSignedCents(
+  cents: number,
+  prefs: LocalePrefs = DEFAULT_PREFS,
+): string {
+  return new Intl.NumberFormat(localeFor(prefs.lang, prefs.currency), {
+    style: "currency",
+    currency: prefs.currency,
+    signDisplay: "always",
+    maximumFractionDigits: prefs.currency === "UGX" ? 0 : 2,
+  }).format(cents / 100);
 }
 
-export function formatDate(date: Date): string {
-  return dateFormatter.format(date);
+export function formatDate(
+  date: Date,
+  prefs: LocalePrefs = DEFAULT_PREFS,
+): string {
+  const lang = prefs.lang as Lang;
+  return new Intl.DateTimeFormat(
+    lang === "sw" ? "sw-KE" : localeFor(prefs.lang, prefs.currency),
+    { dateStyle: "medium", timeStyle: "short", timeZone: "UTC" },
+  ).format(date);
 }
 
-export function statusLabel(status: EscrowStatus): string {
-  return getEscrowStatusLabel(status);
+export function statusLabel(status: EscrowStatus, lang: Lang = "en"): string {
+  return getEscrowStatusLabel(status, lang);
 }
 
 export function statusTone(status: EscrowStatus): string {
   return getEscrowStatusTone(status);
 }
 
-export function roleLabel(role: EscrowRole): string {
-  switch (role) {
-    case "buyer":
-      return "Buyer";
-    case "seller":
-      return "Seller";
-    case "carrier":
-      return "Carrier";
-    case "mediator":
-      return "Support";
-  }
+export function roleLabel(role: EscrowRole, lang: Lang = "en"): string {
+  return t(lang, `role.${role}` as MessageKey);
 }
 
-export function partySentence(party: EscrowParty): string {
-  switch (party) {
-    case "buyer":
-      return "You are the buyer on this transaction.";
-    case "seller":
-      return "You are the seller on this transaction.";
-    case "carrier":
-      return "You are the assigned carrier on this transaction.";
-    case "mediator":
-      return "You are acting as support on this transaction.";
-  }
+export function partySentence(party: EscrowParty, lang: Lang = "en"): string {
+  return t(lang, `party.${party}` as MessageKey);
 }
 
 export function initialsOf(name: string): string {

@@ -1,14 +1,47 @@
-import Database from "better-sqlite3";
-import fs from "node:fs";
 import path from "node:path";
 
-const SCHEMA = `
+export type Dialect = "sqlite" | "postgres";
+
+/**
+ * Storage adapter shared by SQLite and Postgres. Methods are async so a single
+ * call site works against either driver; transactions are flattened into a
+ * depth counter so nested calls join the enclosing transaction.
+ */
+export interface Db {
+  readonly dialect: Dialect;
+
+  get<T>(sql: string, params?: unknown[]): Promise<T | undefined>;
+  all<T>(sql: string, params?: unknown[]): Promise<T[]>;
+  run(
+    sql: string,
+    params?: unknown[],
+  ): Promise<{ changes: number; lastId: number | bigint | null }>;
+  tx<T>(fn: () => Promise<T>): Promise<T>;
+  exec(sql: string): Promise<void>;
+  close(): Promise<void>;
+}
+
+export type DbLike = Db | Promise<Db>;
+
+const IDENTITY = {
+  sqlite: "INTEGER",
+  postgres: "BIGINT GENERATED ALWAYS AS IDENTITY",
+} as const;
+
+function identityFor(dialect: Dialect): string {
+  return IDENTITY[dialect];
+}
+
+const SCHEMA_TEMPLATE = (identity: string): string => `
 CREATE TABLE IF NOT EXISTS users (
   id            TEXT PRIMARY KEY,
   display_name  TEXT NOT NULL,
   role          TEXT NOT NULL CHECK (role IN ('buyer', 'seller', 'carrier', 'mediator')),
   email         TEXT,
   password_hash TEXT,
+  phone         TEXT,
+  lang          TEXT NOT NULL DEFAULT 'en',
+  currency      TEXT NOT NULL DEFAULT 'KES',
   created_at    TEXT NOT NULL
 );
 
@@ -37,7 +70,7 @@ CREATE TABLE IF NOT EXISTS transactions (
 );
 
 CREATE TABLE IF NOT EXISTS escrow_events (
-  id             INTEGER PRIMARY KEY AUTOINCREMENT,
+  id             ${identity} PRIMARY KEY,
   transaction_id TEXT NOT NULL REFERENCES transactions(id) ON DELETE CASCADE,
   actor_id       TEXT NOT NULL,
   actor_name     TEXT NOT NULL,
@@ -50,21 +83,58 @@ CREATE TABLE IF NOT EXISTS escrow_events (
 );
 
 CREATE TABLE IF NOT EXISTS ledger_accounts (
-  id         TEXT PRIMARY KEY,
-  kind       TEXT NOT NULL CHECK (kind IN ('wallet', 'escrow')),
-  owner_id   TEXT NOT NULL,
-  created_at TEXT NOT NULL,
+  id                    TEXT PRIMARY KEY,
+  kind                  TEXT NOT NULL CHECK (kind IN ('wallet', 'escrow')),
+  owner_id              TEXT NOT NULL,
+  balance_snapshot_cents INTEGER NOT NULL DEFAULT 0,
+  created_at            TEXT NOT NULL,
   UNIQUE (kind, owner_id)
 );
 
 CREATE TABLE IF NOT EXISTS ledger_entries (
-  id           INTEGER PRIMARY KEY AUTOINCREMENT,
+  id           ${identity} PRIMARY KEY,
   account_id   TEXT NOT NULL REFERENCES ledger_accounts(id),
   delta_cents  INTEGER NOT NULL,
   entry_type   TEXT NOT NULL CHECK (entry_type IN ('deposit', 'escrow_deposit', 'escrow_release')),
   reference_id TEXT,
   note         TEXT,
   created_at   TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS otp_codes (
+  id        ${identity} PRIMARY KEY,
+  phone     TEXT NOT NULL,
+  purpose   TEXT NOT NULL CHECK (purpose IN ('login', 'register')),
+  code_hash TEXT NOT NULL,
+  attempts  INTEGER NOT NULL DEFAULT 0,
+  expires_at TEXT NOT NULL,
+  used_at   TEXT
+);
+
+CREATE TABLE IF NOT EXISTS outbox (
+  id           ${identity} PRIMARY KEY,
+  topic        TEXT NOT NULL,
+  payload      TEXT NOT NULL,
+  status       TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'sending', 'sent', 'failed')),
+  attempts     INTEGER NOT NULL DEFAULT 0,
+  created_at   TEXT NOT NULL,
+  processed_at TEXT
+);
+
+CREATE TABLE IF NOT EXISTS notifications (
+  id         ${identity} PRIMARY KEY,
+  user_id    TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  title      TEXT NOT NULL,
+  body       TEXT NOT NULL,
+  read_at    TEXT,
+  created_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS rate_limits (
+  key          TEXT NOT NULL,
+  window_start INTEGER NOT NULL,
+  count        INTEGER NOT NULL DEFAULT 0,
+  PRIMARY KEY (key, window_start)
 );
 
 CREATE INDEX IF NOT EXISTS idx_transactions_buyer ON transactions(buyer_id);
@@ -74,48 +144,125 @@ CREATE INDEX IF NOT EXISTS idx_events_transaction ON escrow_events(transaction_i
 CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(user_id);
 CREATE INDEX IF NOT EXISTS idx_ledger_entries_account ON ledger_entries(account_id, id);
 CREATE INDEX IF NOT EXISTS idx_ledger_entries_reference ON ledger_entries(reference_id, id);
+CREATE INDEX IF NOT EXISTS idx_outbox_status ON outbox(status, id);
+CREATE INDEX IF NOT EXISTS idx_notifications_user ON notifications(user_id, id);
+CREATE INDEX IF NOT EXISTS idx_otp_lookup ON otp_codes(phone, purpose, id);
 `;
 
-const MIGRATIONS = [
-  {
-    id: "users-credentials",
-    run(db: Db): void {
-      const columns = new Set(
-        (db.prepare("PRAGMA table_info(users)").all() as Array<{ name: string }>).map((column) => column.name),
-      );
-
-      if (!columns.has("email")) {
-        db.exec("ALTER TABLE users ADD COLUMN email TEXT");
-      }
-
-      if (!columns.has("password_hash")) {
-        db.exec("ALTER TABLE users ADD COLUMN password_hash TEXT");
-      }
-    },
-  },
-];
-
-const MIGRATION_INDEX = `
+const MIGRATION_INDEX = (identity: string): string => `
 CREATE TABLE IF NOT EXISTS schema_migrations (
-  id           INTEGER PRIMARY KEY AUTOINCREMENT,
+  id          ${identity} PRIMARY KEY,
   migration_id TEXT NOT NULL UNIQUE,
   applied_at   TEXT NOT NULL
 );
 `;
 
-export type Db = Database.Database;
+const TRAILING_INDEXES = `
+CREATE UNIQUE INDEX IF NOT EXISTS idx_users_email ON users(email);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_users_phone ON users(phone);
+`;
 
-export function runMigrations(db: Db): void {
-  db.pragma("journal_mode = WAL");
-  db.pragma("foreign_keys = ON");
-  db.exec(MIGRATION_INDEX);
-  db.exec(SCHEMA);
+interface Migration {
+  id: string;
+  run(db: Db): Promise<void>;
+}
+
+const MIGRATIONS: Migration[] = [
+  {
+    id: "users-credentials",
+    async run(db) {
+      if (db.dialect === "postgres") {
+        return;
+      }
+      const columns = new Set(
+        (
+          await db.all<{ name: string }>("PRAGMA table_info(users)")
+        ).map((column) => column.name),
+      );
+
+      if (!columns.has("email")) {
+        await db.exec("ALTER TABLE users ADD COLUMN email TEXT");
+      }
+      if (!columns.has("password_hash")) {
+        await db.exec("ALTER TABLE users ADD COLUMN password_hash TEXT");
+      }
+    },
+  },
+  {
+    id: "users-phone",
+    async run(db) {
+      if (db.dialect === "postgres") {
+        return;
+      }
+      const columns = new Set(
+        (await db.all<{ name: string }>("PRAGMA table_info(users)")).map(
+          (column) => column.name,
+        ),
+      );
+      if (!columns.has("phone")) {
+        await db.exec("ALTER TABLE users ADD COLUMN phone TEXT");
+      }
+    },
+  },
+  {
+    id: "users-locale",
+    async run(db) {
+      if (db.dialect === "postgres") {
+        return;
+      }
+      const columns = new Set(
+        (await db.all<{ name: string }>("PRAGMA table_info(users)")).map(
+          (column) => column.name,
+        ),
+      );
+      if (!columns.has("lang")) {
+        await db.exec("ALTER TABLE users ADD COLUMN lang TEXT NOT NULL DEFAULT 'en'");
+      }
+      if (!columns.has("currency")) {
+        await db.exec("ALTER TABLE users ADD COLUMN currency TEXT NOT NULL DEFAULT 'KES'");
+      }
+    },
+  },
+  {
+    id: "ledger-balance-snapshot",
+    async run(db) {
+      if (db.dialect === "postgres") {
+        return;
+      }
+      const columns = new Set(
+        (await db.all<{ name: string }>("PRAGMA table_info(ledger_accounts)")).map(
+          (column) => column.name,
+        ),
+      );
+      if (!columns.has("balance_snapshot_cents")) {
+        await db.exec(
+          "ALTER TABLE ledger_accounts ADD COLUMN balance_snapshot_cents INTEGER NOT NULL DEFAULT 0",
+        );
+      }
+      await db.exec(
+        `UPDATE ledger_accounts
+         SET balance_snapshot_cents = (
+           SELECT COALESCE(SUM(delta_cents), 0) FROM ledger_entries WHERE account_id = ledger_accounts.id
+         )`,
+      );
+    },
+  },
+];
+
+export async function runMigrations(db: Db): Promise<void> {
+  if (db.dialect === "sqlite") {
+    await db.exec("PRAGMA foreign_keys = ON");
+    await db.exec("PRAGMA journal_mode = WAL");
+  }
+
+  await db.exec(MIGRATION_INDEX(identityFor(db.dialect)));
+  await db.exec(SCHEMA_TEMPLATE(identityFor(db.dialect)));
 
   const applied = new Set(
     (
-      db.prepare("SELECT migration_id FROM schema_migrations").all() as Array<{
-        migration_id: string;
-      }>
+      await db.all<{ migration_id: string }>(
+        "SELECT migration_id FROM schema_migrations",
+      )
     ).map((row) => row.migration_id),
   );
 
@@ -124,50 +271,72 @@ export function runMigrations(db: Db): void {
       continue;
     }
 
-    db.transaction(() => {
-      migration.run(db);
-      db.prepare("INSERT INTO schema_migrations (migration_id, applied_at) VALUES (?, ?)").run(
-        migration.id,
-        new Date().toISOString(),
+    await db.tx(async () => {
+      await migration.run(db);
+      await db.run(
+        "INSERT INTO schema_migrations (migration_id, applied_at) VALUES (?, ?)",
+        [migration.id, new Date().toISOString()],
       );
-    })();
+    });
   }
 
-  db.exec("CREATE INDEX IF NOT EXISTS idx_users_email ON users(email)");
+  await db.exec(TRAILING_INDEXES);
 }
 
-export function openDatabase(file: string): Db {
-  if (file !== ":memory:") {
-    fs.mkdirSync(path.dirname(file), { recursive: true });
+export interface SqliteTarget {
+  type: "sqlite";
+  file: string;
+}
+
+export interface PostgresTarget {
+  type: "postgres";
+  url: string;
+}
+
+export type DbTarget = SqliteTarget | PostgresTarget;
+
+export function resolveDatabaseTarget(): DbTarget {
+  if (process.env.VENN_DB_URL) {
+    return { type: "postgres", url: process.env.VENN_DB_URL };
   }
 
-  const db = new Database(file);
-  runMigrations(db);
-  return db;
-}
+  let file: string;
 
-export function resolveDatabaseFile(): string {
   if (process.env.VENN_DB_FILE) {
-    return process.env.VENN_DB_FILE;
+    file = process.env.VENN_DB_FILE;
+  } else if (process.env.NODE_ENV === "test") {
+    file = ":memory:";
+  } else {
+    file = path.join(process.cwd(), "data", "venn.db");
   }
 
-  if (process.env.NODE_ENV === "test") {
-    return ":memory:";
-  }
-
-  return path.join(process.cwd(), "data", "venn.db");
+  return { type: "sqlite", file };
 }
 
-const globalForDb = globalThis as unknown as { vennDb?: Db };
+export async function openDatabase(target: string | DbTarget): Promise<Db> {
+  if (typeof target === "string") {
+    target = { type: "sqlite", file: target };
+  }
 
-export function getDatabase(): Db {
+  if (target.type === "postgres") {
+    const { openPostgresDatabase } = await import("@/lib/db/postgres");
+    return openPostgresDatabase(target.url);
+  }
+
+  const { openSqliteDatabase } = await import("@/lib/db/sqlite");
+  return openSqliteDatabase(target.file);
+}
+
+const globalForDb = globalThis as unknown as { vennDb?: Promise<Db> };
+
+export function getDatabase(): Promise<Db> {
   if (!globalForDb.vennDb) {
-    globalForDb.vennDb = openDatabase(resolveDatabaseFile());
+    globalForDb.vennDb = openDatabase(resolveDatabaseTarget());
   }
 
   return globalForDb.vennDb;
 }
 
-export function setDatabase(db: Db): void {
-  globalForDb.vennDb = db;
+export function setDatabase(db: Db | Promise<Db>): void {
+  globalForDb.vennDb = Promise.resolve(db);
 }

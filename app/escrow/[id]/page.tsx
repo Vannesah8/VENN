@@ -6,6 +6,7 @@ import { StatusPill } from "@/app/components/StatusPill";
 import { WorkspaceShell } from "@/app/components/WorkspaceShell";
 import { canViewTransaction, describeActions, resolveParty } from "@/lib/escrow";
 import { formatCents, formatDate, formatSignedCents, partySentence, roleLabel } from "@/lib/format";
+import { getPrefsFromCookies } from "@/lib/prefs";
 import { requireActor } from "@/lib/session";
 import {
   getEscrowLedgerEntries,
@@ -27,10 +28,12 @@ export default async function EscrowDetailPage({
   params: Promise<{ id: string }>;
 }) {
   const { id } = await params;
-  const actor = await requireActor();
-  const users = listUsers();
-  const transaction = getTransactionViewById(id);
-  const balance = getWalletBalance(actor.id);
+  const [actor, prefs] = await Promise.all([requireActor(), getPrefsFromCookies()]);
+  const [users, transaction, balance] = await Promise.all([
+    listUsers(),
+    getTransactionViewById(id),
+    getWalletBalance(actor.id),
+  ]);
 
   if (!transaction) {
     notFound();
@@ -40,18 +43,21 @@ export default async function EscrowDetailPage({
     notFound();
   }
 
-  const events = listEscrowEvents(transaction.id);
-  const actions = describeActions(transaction, actor);
+  const [events, ledger] = await Promise.all([
+    listEscrowEvents(transaction.id),
+    getEscrowLedgerEntries(transaction.id),
+  ]);
+  const actions = describeActions(transaction, actor, prefs.lang);
   const party = resolveParty(transaction, actor);
   const carriers = users
     .filter((user) => user.role === "carrier")
     .map((user) => ({ id: user.id, displayName: user.displayName }));
-  const ledger = getEscrowLedgerEntries(transaction.id);
 
   return (
     <WorkspaceShell
       actor={actor}
       walletBalance={balance}
+      prefs={prefs}
       eyebrow="Trust layer"
       title={transaction.itemName}
     >
@@ -60,7 +66,7 @@ export default async function EscrowDetailPage({
           ← All transactions
         </Link>
         <span className="text-sm text-[#8b9d95]">{transaction.id}</span>
-        <StatusPill status={transaction.status} />
+        <StatusPill status={transaction.status} lang={prefs.lang} />
       </div>
 
       <div className="grid gap-6 lg:grid-cols-[1.35fr_0.65fr]">
@@ -70,7 +76,7 @@ export default async function EscrowDetailPage({
               {[
                 { label: "Buyer", value: transaction.buyerName },
                 { label: "Seller", value: transaction.sellerName },
-                { label: "Escrow balance", value: formatCents(transaction.amountCents) },
+                { label: "Escrow balance", value: formatCents(transaction.amountCents, prefs) },
               ].map((cell) => (
                 <div key={cell.label} className="rounded-2xl border border-[#edf3ee] bg-[#f8faf8] p-4">
                   <p className="text-xs uppercase tracking-[0.2em] text-[#5d736a]">{cell.label}</p>
@@ -128,7 +134,7 @@ export default async function EscrowDetailPage({
                             inbound ? "text-[#1e4d3d]" : "text-[#8a5a12]"
                           }`}
                         >
-                          {formatSignedCents(entry.deltaCents)}
+                          {formatSignedCents(entry.deltaCents, prefs)}
                         </p>
                       </div>
                     </li>
@@ -156,12 +162,16 @@ export default async function EscrowDetailPage({
                   <div className="flex-1 rounded-2xl border border-[#edf3ee] bg-[#f8faf8] p-4">
                     <div className="flex flex-wrap items-center justify-between gap-2">
                       <h3 className="font-medium text-[#18352d]">
-                        {event.action === "created" ? "Escrow funded" : event.action.replace(/_/g, " ")}
+                        {event.action === "created"
+                          ? "Escrow funded"
+                          : event.action.replace(/_/g, " ")}
                       </h3>
-                      <span className="text-xs text-[#8b9d95]">{formatDate(event.createdAt)}</span>
+                      <span className="text-xs text-[#8b9d95]">
+                        {formatDate(event.createdAt, prefs)}
+                      </span>
                     </div>
                     <p className="mt-2 text-sm text-[#5d736a]">
-                      {event.actorName} ({roleLabel(event.actorRole)})
+                      {event.actorName} ({roleLabel(event.actorRole, prefs.lang)})
                       {event.fromStatus ? ` · ${event.fromStatus.replace(/_/g, " ")} → ` : " · "}
                       {event.toStatus.replace(/_/g, " ")}
                     </p>
@@ -209,10 +219,15 @@ export default async function EscrowDetailPage({
           <section className="rounded-3xl border border-[#dfece5] bg-white p-6 shadow-[0_16px_30px_rgba(24,53,45,0.05)]">
             <h2 className="text-xl font-semibold text-[#18352d]">Available actions</h2>
             <p className="mt-2 text-sm text-[#5d736a]">
-              {party ? partySentence(party) : "You are not a party to this transaction."}
+              {party ? partySentence(party, prefs.lang) : "You are not a party to this transaction."}
             </p>
             <div className="mt-4">
-              <ActionPanel transactionId={transaction.id} actions={actions} carriers={carriers} />
+              <ActionPanel
+                transactionId={transaction.id}
+                actions={actions}
+                carriers={carriers}
+                lang={prefs.lang}
+              />
             </div>
           </section>
         </aside>

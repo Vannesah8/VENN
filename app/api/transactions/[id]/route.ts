@@ -7,6 +7,7 @@ import {
   canViewTransaction,
   isEscrowAction,
 } from "@/lib/escrow";
+import { processNotifications } from "@/lib/notifications";
 import { getCurrentActor } from "@/lib/session";
 import {
   applyActionToTransaction,
@@ -26,13 +27,13 @@ export async function GET(
     return guard;
   }
 
-  const transaction = getTransactionViewById(id);
+  const transaction = await getTransactionViewById(id);
 
   if (!transaction || !actor || !canViewTransaction(transaction, actor)) {
     return NextResponse.json({ error: "Transaction not found" }, { status: 404 });
   }
 
-  return NextResponse.json({ transaction, events: listEscrowEvents(id) });
+  return NextResponse.json({ transaction, events: await listEscrowEvents(id) });
 }
 
 export async function PATCH(
@@ -55,13 +56,17 @@ export async function PATCH(
       throw new EscrowError("unknown_action", `Unsupported action: ${String(action)}`);
     }
 
-    const transaction = applyActionToTransaction(
+    const transaction = await applyActionToTransaction(
       id,
       actor!,
       buildPayload(action, body) as EscrowActionPayload,
     );
+    await processNotifications();
 
-    return NextResponse.json({ transaction, events: listEscrowEvents(id) });
+    return NextResponse.json({
+      transaction,
+      events: await listEscrowEvents(id),
+    });
   } catch (error) {
     return escrowErrorResponse(error);
   }

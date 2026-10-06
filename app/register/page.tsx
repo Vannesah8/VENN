@@ -2,10 +2,12 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 
 import { RegisterForm } from "@/app/components/RegisterForm";
+import { t } from "@/lib/i18n";
+import { getPrefsFromCookies } from "@/lib/prefs";
 import { getCurrentActor } from "@/lib/session";
 
 export default async function RegisterPage() {
-  const actor = await getCurrentActor();
+  const [actor, prefs] = await Promise.all([getCurrentActor(), getPrefsFromCookies()]);
 
   if (actor) {
     redirect("/dashboard");
@@ -22,14 +24,14 @@ export default async function RegisterPage() {
         </Link>
 
         <div className="mt-8 rounded-3xl border border-[#dfece5] bg-white p-8 shadow-[0_16px_30px_rgba(24,53,45,0.06)]">
-          <p className="text-sm uppercase tracking-[0.22em] text-[#1e4d3d]">New identity</p>
-          <h1 className="mt-2 text-2xl font-semibold">Create an account</h1>
-          <p className="mt-2 text-sm text-[#5d736a]">
-            Buyers fund escrow; sellers dispatch and get paid on release.
+          <p className="text-sm uppercase tracking-[0.22em] text-[#1e4d3d]">
+            {t(prefs.lang, "register.eyebrow")}
           </p>
+          <h1 className="mt-2 text-2xl font-semibold">{t(prefs.lang, "register.title")}</h1>
+          <p className="mt-2 text-sm text-[#5d736a]">{t(prefs.lang, "register.subtitle")}</p>
 
           <div className="mt-6">
-            <RegisterForm />
+            <RegisterForm prefs={prefs} />
           </div>
         </div>
       </div>

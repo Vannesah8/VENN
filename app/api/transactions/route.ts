@@ -4,9 +4,12 @@ import { parseAmountToCents } from "@/lib/money";
 import { escrowErrorResponse, readJson, requireActorOrResponse } from "@/lib/api";
 import { EscrowError } from "@/lib/escrow";
 import { getCurrentActor } from "@/lib/session";
-import { createTransaction, listTransactionsForActor } from "@/lib/transactions";
+import {
+  createTransaction,
+  pageTransactionsForActor,
+} from "@/lib/transactions";
 
-export async function GET() {
+export async function GET(request: Request) {
   const actor = await getCurrentActor();
   const guard = requireActorOrResponse(actor);
 
@@ -14,9 +17,17 @@ export async function GET() {
     return guard;
   }
 
+  const url = new URL(request.url);
+  const cursor = url.searchParams.get("cursor") ?? null;
+  const limitParam = Number(url.searchParams.get("limit") ?? "20");
+  const limit = Number.isFinite(limitParam) && limitParam > 0 ? limitParam : 20;
+
+  const page = await pageTransactionsForActor(actor!, { cursor, limit });
+
   return NextResponse.json({
     actor: { id: actor!.id, role: actor!.role },
-    transactions: listTransactionsForActor(actor!),
+    transactions: page.transactions,
+    nextCursor: page.nextCursor,
   });
 }
 
@@ -37,7 +48,7 @@ export async function POST(request: Request) {
       throw new EscrowError("invalid_input", "sellerId and itemName are required");
     }
 
-    const transaction = createTransaction(
+    const transaction = await createTransaction(
       {
         buyerId: actor!.id,
         sellerId,

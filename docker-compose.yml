@@ -1,0 +1,21 @@
+services:
+  postgres:
+    image: postgres:16
+    container_name: venn-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: venn
+      POSTGRES_PASSWORD: venn
+      POSTGRES_DB: venn
+    ports:
+      - "5432:5432"
+    volumes:
+      - venn-pg-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U venn"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  venn-pg-data:

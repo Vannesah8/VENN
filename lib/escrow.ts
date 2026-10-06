@@ -1,3 +1,5 @@
+import { t, type Lang, type MessageKey } from "@/lib/i18n";
+
 export const ESCROW_ROLES = ["buyer", "seller", "carrier", "mediator"] as const;
 export type EscrowRole = (typeof ESCROW_ROLES)[number];
 
@@ -150,15 +152,6 @@ const ACTION_RULES: Record<EscrowAction, ActionRule> = {
   },
 };
 
-const STATUS_LABELS: Record<EscrowStatus, string> = {
-  escrow_funded: "Escrow funded",
-  shipped: "Shipped",
-  in_transit: "In transit",
-  delivered: "Delivered",
-  released: "Released to seller",
-  disputed: "Dispute review",
-};
-
 const STATUS_TONES: Record<EscrowStatus, "neutral" | "progress" | "positive" | "warning"> = {
   escrow_funded: "neutral",
   shipped: "progress",
@@ -180,8 +173,11 @@ export function isEscrowAction(value: unknown): value is EscrowAction {
   return typeof value === "string" && (ESCROW_ACTIONS as readonly string[]).includes(value);
 }
 
-export function getEscrowStatusLabel(status: EscrowStatus): string {
-  return STATUS_LABELS[status] ?? "Awaiting buyer payment";
+export function getEscrowStatusLabel(
+  status: EscrowStatus,
+  lang: Lang = "en",
+): string {
+  return t(lang, `status.${status}` as MessageKey);
 }
 
 export function getEscrowStatusTone(status: EscrowStatus) {
@@ -267,19 +263,24 @@ export interface DescribedAction {
   label: string;
   description: string;
   to: EscrowStatus;
+  actionLabelKey: string;
+  actionDescriptionKey: string;
 }
 
 export function describeActions(
   transaction: EscrowTransaction,
   actor: EscrowActor,
+  lang: Lang = "en",
 ): DescribedAction[] {
   return availableActions(transaction, actor).map((action) => {
     const rule = ACTION_RULES[action];
     return {
       action,
-      label: rule.label,
-      description: rule.description,
+      label: t(lang, `action.${action}.label` as MessageKey),
+      description: t(lang, `action.${action}.description` as MessageKey),
       to: rule.to,
+      actionLabelKey: `action.${action}.label`,
+      actionDescriptionKey: `action.${action}.description`,
     };
   });
 }

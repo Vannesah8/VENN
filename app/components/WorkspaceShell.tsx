@@ -2,17 +2,20 @@ import Link from "next/link";
 import type { ReactNode } from "react";
 
 import type { EscrowActor } from "@/lib/escrow";
+import type { LocalePrefs } from "@/lib/i18n";
 import { SessionBar } from "@/app/components/SessionBar";
 
 export function WorkspaceShell({
   actor,
   walletBalance,
+  prefs,
   eyebrow,
   title,
   children,
 }: {
   actor: EscrowActor;
   walletBalance: number;
+  prefs: LocalePrefs;
   eyebrow: string;
   title: string;
   children: ReactNode;
@@ -47,7 +50,7 @@ export function WorkspaceShell({
           </nav>
         </div>
 
-        <SessionBar actor={actor} walletBalance={walletBalance} />
+        <SessionBar actor={actor} walletBalance={walletBalance} prefs={prefs} />
 
         {children}
       </div>

@@ -6,6 +6,8 @@ import { StatusPill } from "@/app/components/StatusPill";
 import { WorkspaceShell } from "@/app/components/WorkspaceShell";
 import { describeActions } from "@/lib/escrow";
 import { formatCents, formatDate, roleLabel } from "@/lib/format";
+import { listNotifications } from "@/lib/notifications";
+import { getPrefsFromCookies } from "@/lib/prefs";
 import { requireActor } from "@/lib/session";
 import {
   getPortfolioStats,
@@ -15,18 +17,24 @@ import {
 } from "@/lib/transactions";
 
 export default async function DashboardPage() {
-  const actor = await requireActor();
-  const users = listUsers();
-  const transactions = listTransactionsForActor(actor);
+  const [actor, prefs] = await Promise.all([requireActor(), getPrefsFromCookies()]);
+  const [users, transactions, balance, notifications] = await Promise.all([
+    listUsers(),
+    listTransactionsForActor(actor),
+    getWalletBalance(actor.id),
+    listNotifications(actor.id),
+  ]);
   const stats = getPortfolioStats(transactions);
-  const balance = getWalletBalance(actor.id);
   const sellers = users
     .filter((user) => user.role === "seller")
     .map((user) => ({ id: user.id, displayName: user.displayName }));
 
   const actionQueue = transactions
     .flatMap((transaction) =>
-      describeActions(transaction, actor).map((action) => ({ transaction, action })),
+      describeActions(transaction, actor, prefs.lang).map((action) => ({
+        transaction,
+        action,
+      })),
     )
     .slice(0, 6);
 
@@ -34,13 +42,14 @@ export default async function DashboardPage() {
     <WorkspaceShell
       actor={actor}
       walletBalance={balance}
+      prefs={prefs}
       eyebrow="Operations"
       title="Marketplace workspace"
     >
       <div className="grid gap-4 md:grid-cols-4">
         {[
-          { label: "Escrow held", value: formatCents(stats.heldCents) },
-          { label: "Released to sellers", value: formatCents(stats.releasedCents) },
+          { label: "Escrow held", value: formatCents(stats.heldCents, prefs) },
+          { label: "Released to sellers", value: formatCents(stats.releasedCents, prefs) },
           { label: "Parcels in flight", value: String(stats.inFlightCount) },
           { label: "Open disputes", value: String(stats.disputedCount) },
         ].map((card) => (
@@ -79,12 +88,14 @@ export default async function DashboardPage() {
                     <p className="truncate font-medium text-[#18352d]">{transaction.itemName}</p>
                     <p className="text-sm text-[#5d736a]">
                       {transaction.buyerName} → {transaction.sellerName} · updated{" "}
-                      {formatDate(transaction.updatedAt)}
+                      {formatDate(transaction.updatedAt, prefs)}
                     </p>
                   </div>
                   <div className="flex items-center gap-3 text-right">
-                    <p className="font-medium text-[#18352d]">{formatCents(transaction.amountCents)}</p>
-                    <StatusPill status={transaction.status} />
+                    <p className="font-medium text-[#18352d]">
+                      {formatCents(transaction.amountCents, prefs)}
+                    </p>
+                    <StatusPill status={transaction.status} lang={prefs.lang} />
                   </div>
                 </Link>
               ))}
@@ -98,13 +109,13 @@ export default async function DashboardPage() {
               <div>
                 <p className="text-sm text-[#5d736a]">Wallet balance</p>
                 <p className="mt-2 text-3xl font-semibold text-[#1e4d3d]">
-                  {formatCents(balance)}
+                  {formatCents(balance, prefs)}
                 </p>
               </div>
               <p className="text-xs text-[#8b9d95]">Demo cash rail · top up to fund escrow</p>
             </div>
             <div className="mt-4">
-              <FundWalletForm />
+              <FundWalletForm prefs={prefs} />
             </div>
           </section>
 
@@ -125,9 +136,34 @@ export default async function DashboardPage() {
                     >
                       <p className="text-sm font-medium text-[#18352d]">{action.label}</p>
                       <p className="mt-1 text-sm text-[#5d736a]">
-                        {transaction.itemName} · {formatCents(transaction.amountCents)}
+                        {transaction.itemName} · {formatCents(transaction.amountCents, prefs)}
                       </p>
                     </Link>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </section>
+
+          <section className="rounded-3xl border border-[#dfece5] bg-white p-6 shadow-[0_16px_30px_rgba(24,53,45,0.05)]">
+            <h2 className="text-xl font-semibold text-[#18352d]">Recent updates</h2>
+
+            {notifications.length === 0 ? (
+              <p className="mt-4 rounded-2xl border border-[#edf3ee] bg-[#f8faf8] p-4 text-sm text-[#5d736a]">
+                Status pings and SMS alerts appear here when transactions move.
+              </p>
+            ) : (
+              <ul className="mt-4 space-y-2">
+                {notifications.map((notification) => (
+                  <li
+                    key={notification.id}
+                    className="rounded-2xl border border-[#edf3ee] bg-[#f8faf8] p-3 text-sm text-[#18352d]"
+                  >
+                    <p className="font-medium">{notification.title}</p>
+                    <p className="mt-1 text-[#5d736a]">{notification.body}</p>
+                    <p className="mt-1 text-xs text-[#8b9d95]">
+                      {formatDate(notification.createdAt, prefs)}
+                    </p>
                   </li>
                 ))}
               </ul>
@@ -139,10 +175,10 @@ export default async function DashboardPage() {
               <h2 className="text-xl font-semibold text-[#18352d]">Fund a new escrow</h2>
               <p className="mt-2 text-sm text-[#5d736a]">
                 Funds move out of your wallet and stay held until you confirm delivery. Signed in as{" "}
-                {roleLabel(actor.role).toLowerCase()}.
+                {roleLabel(actor.role, prefs.lang).toLowerCase()}.
               </p>
               <div className="mt-4">
-                <OpenEscrowForm sellers={sellers} />
+                <OpenEscrowForm sellers={sellers} prefs={prefs} />
               </div>
             </section>
           ) : null}

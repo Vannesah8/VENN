@@ -21,6 +21,9 @@ import {
   listTransactionsForActor,
   listUsers,
   getUserByEmail,
+  pageTransactionsForActor,
+  getUserByPhone,
+  updateUserPrefs,
 } from "./transactions";
 
 const BUYER: EscrowActor = { id: "buyer_1", displayName: "Aisha Mwangi", role: "buyer" };
@@ -41,8 +44,8 @@ const START_BALANCE = 1_000_000;
 
 let db: Db;
 
-function seedUser(actor: EscrowActor): void {
-  createUser(
+async function seedUser(actor: EscrowActor): Promise<void> {
+  await createUser(
     {
       id: actor.id,
       displayName: actor.displayName,
@@ -54,47 +57,47 @@ function seedUser(actor: EscrowActor): void {
   );
 }
 
-function fundWallet(actor: EscrowActor, amountCents = START_BALANCE): void {
-  depositWalletFunds(actor.id, amountCents, "Test top-up", db);
+async function fundWallet(actor: EscrowActor, amountCents = START_BALANCE): Promise<void> {
+  await depositWalletFunds(actor.id, amountCents, "Test top-up", db);
 }
 
-function freshDatabase(): void {
-  db = openDatabase(":memory:");
+async function freshDatabase(): Promise<void> {
+  db = await openDatabase(":memory:");
   setDatabase(db);
 
   for (const actor of [BUYER, OTHER_BUYER, SELLER, CARRIER, MEDIATOR]) {
-    seedUser(actor);
+    await seedUser(actor);
   }
 
-  fundWallet(BUYER);
-  fundWallet(OTHER_BUYER);
+  await fundWallet(BUYER);
+  await fundWallet(OTHER_BUYER);
 }
 
 function newEscrow(itemName = "Vintage camera lens", amountCents = 124_000) {
   return createTransaction({ buyerId: BUYER.id, sellerId: SELLER.id, itemName, amountCents }, BUYER, db);
 }
 
-function assertEscrowError(fn: () => unknown, code: string): void {
-  assert.throws(fn, (error: unknown) => {
+async function assertEscrowError(fn: () => Promise<unknown>, code: string): Promise<void> {
+  await assert.rejects(fn, (error: unknown) => {
     assert.ok(error instanceof EscrowError, "expected an EscrowError");
     assert.equal(error.code, code);
     return true;
   });
 }
 
-test("createTransaction persists a funded escrow and its first event", (t) => {
-  freshDatabase();
-  t.after(() => db.close());
+test("createTransaction persists a funded escrow and its first event", async (t) => {
+  await freshDatabase();
+  t.after(async () => db.close());
 
-  const created = newEscrow();
-  const stored = getTransactionById(created.id, db);
+  const created = await newEscrow();
+  const stored = await getTransactionById(created.id, db);
 
   assert.ok(stored);
   assert.equal(stored.status, "escrow_funded");
   assert.ok(stored.createdAt instanceof Date);
   assert.ok(stored.updatedAt instanceof Date);
 
-  const events = listEscrowEvents(created.id, db);
+  const events = await listEscrowEvents(created.id, db);
   assert.equal(events.length, 1);
   assert.equal(events[0].action, "created");
   assert.equal(events[0].actorId, BUYER.id);
@@ -102,21 +105,21 @@ test("createTransaction persists a funded escrow and its first event", (t) => {
   assert.equal(events[0].toStatus, "escrow_funded");
 });
 
-test("dates survive a round trip through storage", (t) => {
-  freshDatabase();
-  t.after(() => db.close());
+test("dates survive a round trip through storage", async (t) => {
+  await freshDatabase();
+  t.after(async () => db.close());
 
-  const created = newEscrow();
-  const stored = getTransactionById(created.id, db)!;
+  const created = await newEscrow();
+  const stored = (await getTransactionById(created.id, db))!;
 
   assert.equal(stored.createdAt.toISOString(), created.createdAt.toISOString());
 });
 
-test("createTransaction refuses actors that are not buyers", (t) => {
-  freshDatabase();
-  t.after(() => db.close());
+test("createTransaction refuses actors that are not buyers", async (t) => {
+  await freshDatabase();
+  t.after(async () => db.close());
 
-  assertEscrowError(
+  await assertEscrowError(
     () =>
       createTransaction(
         { buyerId: BUYER.id, sellerId: SELLER.id, itemName: "Lens", amountCents: 100 },
@@ -127,11 +130,11 @@ test("createTransaction refuses actors that are not buyers", (t) => {
   );
 });
 
-test("createTransaction requires a known counterparty", (t) => {
-  freshDatabase();
-  t.after(() => db.close());
+test("createTransaction requires a known counterparty", async (t) => {
+  await freshDatabase();
+  t.after(async () => db.close());
 
-  assertEscrowError(
+  await assertEscrowError(
     () =>
       createTransaction(
         { buyerId: BUYER.id, sellerId: "ghost", itemName: "Lens", amountCents: 100 },
@@ -142,17 +145,17 @@ test("createTransaction requires a known counterparty", (t) => {
   );
 });
 
-test("funding an escrow debits the wallet and holds the amount", (t) => {
-  freshDatabase();
-  t.after(() => db.close());
+test("funding an escrow debits the wallet and holds the amount", async (t) => {
+  await freshDatabase();
+  t.after(async () => db.close());
 
-  const before = getWalletBalance(BUYER.id, db);
-  const { id, amountCents } = newEscrow();
+  const before = await getWalletBalance(BUYER.id, db);
+  const { id, amountCents } = await newEscrow();
 
-  assert.equal(getWalletBalance(BUYER.id, db), before - amountCents);
-  assert.equal(getEscrowAccountBalance(id, db), amountCents);
+  assert.equal(await getWalletBalance(BUYER.id, db), before - amountCents);
+  assert.equal(await getEscrowAccountBalance(id, db), amountCents);
 
-  const entries = getEscrowLedgerEntries(id, db);
+  const entries = await getEscrowLedgerEntries(id, db);
   assert.equal(entries.length, 2);
   assert.deepEqual(
     entries.map((entry) => entry.entryType),
@@ -162,16 +165,16 @@ test("funding an escrow debits the wallet and holds the amount", (t) => {
   assert.equal(entries[1].deltaCents, amountCents);
 });
 
-test("createTransaction refuses a buyer without enough funds", (t) => {
-  freshDatabase();
-  t.after(() => db.close());
+test("createTransaction refuses a buyer without enough funds", async (t) => {
+  await freshDatabase();
+  t.after(async () => db.close());
 
   const THIN_BUYER: EscrowActor = { id: "buyer_thin", displayName: "Thin Buyer", role: "buyer" };
-  seedUser(THIN_BUYER);
-  depositWalletFunds(THIN_BUYER.id, 5_000, "thin wallet", db);
-  const balance = getWalletBalance(THIN_BUYER.id, db);
+  await seedUser(THIN_BUYER);
+  await depositWalletFunds(THIN_BUYER.id, 5_000, "thin wallet", db);
+  const balance = await getWalletBalance(THIN_BUYER.id, db);
 
-  assertEscrowError(
+  await assertEscrowError(
     () =>
       createTransaction(
         { buyerId: THIN_BUYER.id, sellerId: SELLER.id, itemName: "Lens", amountCents: 10_000 },
@@ -181,61 +184,58 @@ test("createTransaction refuses a buyer without enough funds", (t) => {
     "insufficient_funds",
   );
 
-  assert.equal(getWalletBalance(THIN_BUYER.id, db), balance);
-  assert.equal(
-    (db.prepare("SELECT COUNT(*) AS count FROM transactions").get() as { count: number }).count,
-    0,
-  );
+  assert.equal(await getWalletBalance(THIN_BUYER.id, db), balance);
+  assert.equal((await db.get<{ count: number }>("SELECT COUNT(*) AS count FROM transactions"))?.count ?? 0, 0);
 });
 
-test("releasing an escrow pays the seller", (t) => {
-  freshDatabase();
-  t.after(() => db.close());
+test("releasing an escrow pays the seller", async (t) => {
+  await freshDatabase();
+  t.after(async () => db.close());
 
-  const { id, amountCents } = newEscrow();
-  const sellerBefore = getWalletBalance(SELLER.id, db);
+  const { id, amountCents } = await newEscrow();
+  const sellerBefore = await getWalletBalance(SELLER.id, db);
 
-  applyActionToTransaction(id, SELLER, { action: "dispatch", input: { ...SHIPMENT } }, db);
-  applyActionToTransaction(id, CARRIER, { action: "scan_in_transit" }, db);
-  applyActionToTransaction(id, CARRIER, { action: "confirm_delivery" }, db);
-  applyActionToTransaction(id, BUYER, { action: "release_funds", input: { note: "Looks good" } }, db);
+  await applyActionToTransaction(id, SELLER, { action: "dispatch", input: { ...SHIPMENT } }, db);
+  await applyActionToTransaction(id, CARRIER, { action: "scan_in_transit" }, db);
+  await applyActionToTransaction(id, CARRIER, { action: "confirm_delivery" }, db);
+  await applyActionToTransaction(id, BUYER, { action: "release_funds", input: { note: "Looks good" } }, db);
 
-  assert.equal(getWalletBalance(SELLER.id, db), sellerBefore + amountCents);
-  assert.equal(getEscrowAccountBalance(id, db), 0);
+  assert.equal(await getWalletBalance(SELLER.id, db), sellerBefore + amountCents);
+  assert.equal(await getEscrowAccountBalance(id, db), 0);
 
-  const entries = getEscrowLedgerEntries(id, db);
+  const entries = await getEscrowLedgerEntries(id, db);
   assert.equal(entries.length, 4);
   assert.equal(entries.at(-1)?.entryType, "escrow_release");
   assert.equal(entries.at(-2)?.entryType, "escrow_release");
 });
 
-test("a dispute keeps the funds in escrow custody", (t) => {
-  freshDatabase();
-  t.after(() => db.close());
+test("a dispute keeps the funds in escrow custody", async (t) => {
+  await freshDatabase();
+  t.after(async () => db.close());
 
-  const { id, amountCents } = newEscrow();
+  const { id, amountCents } = await newEscrow();
 
-  applyActionToTransaction(id, SELLER, { action: "dispatch", input: { ...SHIPMENT } }, db);
-  applyActionToTransaction(id, CARRIER, { action: "scan_in_transit" }, db);
-  applyActionToTransaction(id, CARRIER, { action: "confirm_delivery" }, db);
-  applyActionToTransaction(id, BUYER, { action: "open_dispute", input: { note: "Damaged" } }, db);
+  await applyActionToTransaction(id, SELLER, { action: "dispatch", input: { ...SHIPMENT } }, db);
+  await applyActionToTransaction(id, CARRIER, { action: "scan_in_transit" }, db);
+  await applyActionToTransaction(id, CARRIER, { action: "confirm_delivery" }, db);
+  await applyActionToTransaction(id, BUYER, { action: "open_dispute", input: { note: "Damaged" } }, db);
 
-  assert.equal(getEscrowAccountBalance(id, db), amountCents);
-  assert.equal(getWalletBalance(SELLER.id, db), 0);
+  assert.equal(await getEscrowAccountBalance(id, db), amountCents);
+  assert.equal(await getWalletBalance(SELLER.id, db), 0);
 });
 
-test("the full lifecycle appends an audit trail", (t) => {
-  freshDatabase();
-  t.after(() => db.close());
+test("the full lifecycle appends an audit trail", async (t) => {
+  await freshDatabase();
+  t.after(async () => db.close());
 
-  const { id } = newEscrow();
+  const { id } = await newEscrow();
 
-  applyActionToTransaction(id, SELLER, { action: "dispatch", input: { ...SHIPMENT } }, db);
-  applyActionToTransaction(id, CARRIER, { action: "scan_in_transit" }, db);
-  applyActionToTransaction(id, CARRIER, { action: "confirm_delivery" }, db);
-  applyActionToTransaction(id, BUYER, { action: "release_funds", input: { note: "Looks good" } }, db);
+  await applyActionToTransaction(id, SELLER, { action: "dispatch", input: { ...SHIPMENT } }, db);
+  await applyActionToTransaction(id, CARRIER, { action: "scan_in_transit" }, db);
+  await applyActionToTransaction(id, CARRIER, { action: "confirm_delivery" }, db);
+  await applyActionToTransaction(id, BUYER, { action: "release_funds", input: { note: "Looks good" } }, db);
 
-  const events = listEscrowEvents(id, db);
+  const events = await listEscrowEvents(id, db);
 
   assert.deepEqual(
     events.map((event) => event.action),
@@ -248,95 +248,98 @@ test("the full lifecycle appends an audit trail", (t) => {
   assert.equal(events.at(-1)?.note, "Looks good");
   assert.equal(events.every((event) => event.actorName.length > 0), true);
 
-  assert.equal(getTransactionById(id, db)?.status, "released");
+  assert.equal((await getTransactionById(id, db))?.status, "released");
 });
 
-test("a rejected action leaves no partial write behind", (t) => {
-  freshDatabase();
-  t.after(() => db.close());
+test("a rejected action leaves no partial write behind", async (t) => {
+  await freshDatabase();
+  t.after(async () => db.close());
 
-  const { id } = newEscrow();
-  applyActionToTransaction(id, SELLER, { action: "dispatch", input: { ...SHIPMENT } }, db);
+  const { id } = await newEscrow();
+  await applyActionToTransaction(id, SELLER, { action: "dispatch", input: { ...SHIPMENT } }, db);
 
-  const before = getTransactionById(id, db)!;
-  const eventsBefore = listEscrowEvents(id, db).length;
+  const before = (await getTransactionById(id, db))!;
+  const eventsBefore = (await listEscrowEvents(id, db)).length;
 
-  assertEscrowError(
+  await assertEscrowError(
     () => applyActionToTransaction(id, SELLER, { action: "release_funds" }, db),
     "forbidden",
   );
-  assertEscrowError(
+  await assertEscrowError(
     () => applyActionToTransaction(id, BUYER, { action: "release_funds" }, db),
     "illegal_transition",
   );
 
-  const after = getTransactionById(id, db)!;
+  const after = (await getTransactionById(id, db))!;
 
   assert.equal(after.status, before.status);
   assert.equal(after.updatedAt.toISOString(), before.updatedAt.toISOString());
-  assert.equal(listEscrowEvents(id, db).length, eventsBefore);
+  assert.equal((await listEscrowEvents(id, db)).length, eventsBefore);
 });
 
-test("an unknown transaction id is reported", (t) => {
-  freshDatabase();
-  t.after(() => db.close());
+test("an unknown transaction id is reported", async (t) => {
+  await freshDatabase();
+  t.after(async () => db.close());
 
-  assertEscrowError(() => applyActionToTransaction("txn_missing", BUYER, { action: "release_funds" }, db), "not_found");
+  await assertEscrowError(
+    () => applyActionToTransaction("txn_missing", BUYER, { action: "release_funds" }, db),
+    "not_found",
+  );
 });
 
-test("listTransactionsForActor scopes to the parties", (t) => {
-  freshDatabase();
-  t.after(() => db.close());
+test("listTransactionsForActor scopes to the parties", async (t) => {
+  await freshDatabase();
+  t.after(async () => db.close());
 
-  const mine = newEscrow("Lens", 10_000);
-  const theirs = createTransaction(
+  const mine = await newEscrow("Lens", 10_000);
+  const theirs = await createTransaction(
     { buyerId: OTHER_BUYER.id, sellerId: SELLER.id, itemName: "Headset", amountCents: 36_000 },
     OTHER_BUYER,
     db,
   );
 
-  const asBuyer = listTransactionsForActor(BUYER, db);
+  const asBuyer = await listTransactionsForActor(BUYER, db);
   assert.deepEqual(asBuyer.map((entry) => entry.id), [mine.id]);
   assert.equal(asBuyer[0].buyerName, "Aisha Mwangi");
   assert.equal(asBuyer[0].sellerName, "Keisha Trading Co.");
 
   assert.deepEqual(
-    listTransactionsForActor(SELLER, db)
+    (await listTransactionsForActor(SELLER, db))
       .map((entry) => entry.id)
       .sort(),
     [mine.id, theirs.id].sort(),
   );
-  assert.deepEqual(listTransactionsForActor(MEDIATOR, db).length, 2);
-  assert.deepEqual(listTransactionsForActor(CARRIER, db), []);
+  assert.equal((await listTransactionsForActor(MEDIATOR, db)).length, 2);
+  assert.deepEqual(await listTransactionsForActor(CARRIER, db), []);
 
-  applyActionToTransaction(mine.id, SELLER, { action: "dispatch", input: { ...SHIPMENT } }, db);
+  await applyActionToTransaction(mine.id, SELLER, { action: "dispatch", input: { ...SHIPMENT } }, db);
   assert.deepEqual(
-    listTransactionsForActor(CARRIER, db).map((entry) => entry.id),
+    (await listTransactionsForActor(CARRIER, db)).map((entry) => entry.id),
     [mine.id],
   );
 });
 
-test("getTransactionViewById joins the party names", (t) => {
-  freshDatabase();
-  t.after(() => db.close());
+test("getTransactionViewById joins the party names", async (t) => {
+  await freshDatabase();
+  t.after(async () => db.close());
 
-  const { id } = newEscrow();
-  assert.equal(getTransactionViewById(id, db)?.carrierUserName, null);
+  const { id } = await newEscrow();
+  assert.equal((await getTransactionViewById(id, db))?.carrierUserName, null);
 
-  applyActionToTransaction(id, SELLER, { action: "dispatch", input: { ...SHIPMENT } }, db);
+  await applyActionToTransaction(id, SELLER, { action: "dispatch", input: { ...SHIPMENT } }, db);
 
-  const view = getTransactionViewById(id, db)!;
+  const view = (await getTransactionViewById(id, db))!;
   assert.equal(view.carrierUserName, "FedEx Lagos");
   assert.equal(view.carrierName, "FedEx");
   assert.equal(view.trackingNumber, "1Z9V94X7K9");
-  assert.equal(getTransactionViewById("txn_missing", db), null);
+  assert.equal(await getTransactionViewById("txn_missing", db), null);
 });
 
-test("createUser is idempotent and listUsers is sorted", (t) => {
-  freshDatabase();
-  t.after(() => db.close());
+test("createUser is idempotent and listUsers is sorted", async (t) => {
+  await freshDatabase();
+  t.after(async () => db.close());
 
-  createUser(
+  await createUser(
     {
       id: SELLER.id,
       displayName: "Keisha Trading",
@@ -346,15 +349,58 @@ test("createUser is idempotent and listUsers is sorted", (t) => {
     },
     db,
   );
-  assert.equal(getUserCount(), 5);
-  assert.equal(getUserByEmail("seller_1@test.dev", db)?.passwordHash !== null, true);
+  assert.equal(await getUserCount(), 5);
+  assert.equal((await getUserByEmail("seller_1@test.dev", db))?.passwordHash !== null, true);
 
-  const users = listUsers(db);
+  const users = await listUsers(db);
   assert.equal(users.length, 5);
   assert.deepEqual(
     users.map((user) => user.role),
     [...users.map((user) => user.role)].sort(),
   );
+});
+
+test("getUserByPhone matches normalized numbers and updateUserPrefs persists", async (t) => {
+  await freshDatabase();
+  t.after(async () => db.close());
+
+  await createUser({
+    id: "buyer_phone",
+    displayName: "Phone Buyer",
+    role: "buyer",
+    email: "buyer_phone@test.dev",
+    passwordHash: hashPassword("test-password"),
+    phone: "+254712000001",
+    lang: "en",
+    currency: "KES",
+  }, db);
+
+  assert.equal((await getUserByPhone("+254712000001", db))?.id, "buyer_phone");
+
+  await updateUserPrefs("buyer_phone", { lang: "sw", currency: "UGX" }, db);
+  const updated = (await getUserByPhone("+254712000001", db))!;
+  assert.equal(updated.lang, "sw");
+  assert.equal(updated.currency, "UGX");
+});
+
+test("pageTransactionsForActor paginates without skipping rows", async (t) => {
+  await freshDatabase();
+  t.after(async () => db.close());
+
+  await newEscrow("First lens", 10_000);
+  await newEscrow("Second lens", 20_000);
+  await newEscrow("Third lens", 30_000);
+
+  const first = await pageTransactionsForActor(BUYER, { limit: 2 }, db);
+  assert.equal(first.transactions.length, 2);
+  assert.ok(first.nextCursor);
+
+  const second = await pageTransactionsForActor(BUYER, { cursor: first.nextCursor, limit: 2 }, db);
+  assert.equal(second.transactions.length, 1);
+  assert.equal(second.nextCursor, null);
+
+  const ids = [...first.transactions, ...second.transactions].map((entry) => entry.id);
+  assert.equal(new Set(ids).size, 3);
 });
 
 test("getPortfolioStats splits held from released funds", () => {
@@ -416,6 +462,6 @@ test("escrow error codes map onto HTTP statuses", () => {
   assert.equal(getEscrowErrorStatus("unknown_action"), 400);
 });
 
-function getUserCount(): number {
-  return (db.prepare("SELECT COUNT(*) AS count FROM users").get() as { count: number }).count;
+async function getUserCount(): Promise<number> {
+  return (await db.get<{ count: number }>("SELECT COUNT(*) AS count FROM users"))?.count ?? 0;
 }

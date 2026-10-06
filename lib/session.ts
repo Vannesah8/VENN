@@ -4,7 +4,7 @@ import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 
 import type { EscrowActor, EscrowRole } from "@/lib/escrow";
-import { getDatabase, type Db } from "@/lib/db";
+import { getDatabase, type DbLike } from "@/lib/db";
 
 export const SESSION_COOKIE = "venn_session";
 
@@ -21,52 +21,58 @@ function hashToken(token: string): string {
   return createHash("sha256").update(token).digest("hex");
 }
 
-export function createSessionRecord(
+export async function createSessionRecord(
   userId: string,
-  db: Db = getDatabase(),
-): { token: string; expiresAt: Date } {
+  db: DbLike = getDatabase(),
+): Promise<{ token: string; expiresAt: Date }> {
+  const d = await db;
   const token = randomBytes(32).toString("hex");
   const expiresAt = new Date(Date.now() + SESSION_TTL_MS);
 
-  db.prepare(
+  await d.run(
     "INSERT INTO sessions (token_hash, user_id, created_at, expires_at) VALUES (?, ?, ?, ?)",
-  ).run(hashToken(token), userId, new Date().toISOString(), expiresAt.toISOString());
+    [hashToken(token), userId, new Date().toISOString(), expiresAt.toISOString()],
+  );
 
   return { token, expiresAt };
 }
 
-export function getUserBySessionToken(
+export async function getUserBySessionToken(
   token: string,
-  db: Db = getDatabase(),
-): EscrowActor | null {
+  db: DbLike = getDatabase(),
+): Promise<EscrowActor | null> {
+  const d = await db;
   const hash = hashToken(token);
-  const row = db
-    .prepare(
-      `SELECT s.user_id, u.display_name, u.role, s.expires_at
-       FROM sessions s
-       JOIN users u ON u.id = s.user_id
-       WHERE s.token_hash = ?`,
-    )
-    .get(hash) as SessionRow | undefined;
+  const row = await d.get<SessionRow>(
+    `SELECT s.user_id, u.display_name, u.role, s.expires_at
+     FROM sessions s
+     JOIN users u ON u.id = s.user_id
+     WHERE s.token_hash = ?`,
+    [hash],
+  );
 
   if (!row) {
     return null;
   }
 
   if (new Date(row.expires_at).getTime() < Date.now()) {
-    db.prepare("DELETE FROM sessions WHERE token_hash = ?").run(hash);
+    await d.run("DELETE FROM sessions WHERE token_hash = ?", [hash]);
     return null;
   }
 
   return { id: row.user_id, displayName: row.display_name, role: row.role };
 }
 
-export function deleteSessionByToken(token: string, db: Db = getDatabase()): void {
-  db.prepare("DELETE FROM sessions WHERE token_hash = ?").run(hashToken(token));
+export async function deleteSessionByToken(
+  token: string,
+  db: DbLike = getDatabase(),
+): Promise<void> {
+  const d = await db;
+  await d.run("DELETE FROM sessions WHERE token_hash = ?", [hashToken(token)]);
 }
 
 export async function createSession(userId: string): Promise<void> {
-  const { token, expiresAt } = createSessionRecord(userId);
+  const { token, expiresAt } = await createSessionRecord(userId);
   const cookieStore = await cookies();
 
   cookieStore.set(SESSION_COOKIE, token, {
@@ -94,7 +100,7 @@ export async function destroySession(): Promise<void> {
   const token = cookieStore.get(SESSION_COOKIE)?.value;
 
   if (token) {
-    deleteSessionByToken(token);
+    await deleteSessionByToken(token);
   }
 
   cookieStore.delete(SESSION_COOKIE);

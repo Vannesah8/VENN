@@ -1,11 +1,17 @@
 import Link from "next/link";
 
+import { LoadMoreTransactions } from "@/app/components/LoadMoreTransactions";
 import { StatusPill } from "@/app/components/StatusPill";
 import { WorkspaceShell } from "@/app/components/WorkspaceShell";
 import { getEscrowStatusLabel } from "@/lib/escrow";
+import type { EscrowStatus } from "@/lib/escrow";
 import { formatCents, formatDate } from "@/lib/format";
+import { getPrefsFromCookies } from "@/lib/prefs";
 import { requireActor } from "@/lib/session";
-import { getWalletBalance, listTransactionsForActor } from "@/lib/transactions";
+import {
+  getWalletBalance,
+  pageTransactionsForActor,
+} from "@/lib/transactions";
 
 const FILTERS = [
   { key: "all", label: "All" },
@@ -17,36 +23,27 @@ const FILTERS = [
 
 type FilterKey = (typeof FILTERS)[number]["key"];
 
+const PAGE_SIZE = 10;
+
 export default async function EscrowIndexPage({
   searchParams,
 }: {
   searchParams: Promise<{ filter?: string }>;
 }) {
-  const actor = await requireActor();
+  const [actor, prefs] = await Promise.all([requireActor(), getPrefsFromCookies()]);
   const { filter } = await searchParams;
   const active = (FILTERS.find((entry) => entry.key === filter)?.key ?? "all") as FilterKey;
-  const balance = getWalletBalance(actor.id);
+  const balance = await getWalletBalance(actor.id);
 
-  const all = listTransactionsForActor(actor);
-  const transactions = all.filter((transaction) => {
-    switch (active) {
-      case "held":
-        return transaction.status !== "released";
-      case "delivered":
-        return transaction.status === "delivered";
-      case "disputed":
-        return transaction.status === "disputed";
-      case "released":
-        return transaction.status === "released";
-      default:
-        return true;
-    }
-  });
+  const page = await pageTransactionsForActor(actor, { limit: PAGE_SIZE });
+  const transactions = page.transactions;
+  const loadMoreCursor = page.nextCursor;
 
   return (
     <WorkspaceShell
       actor={actor}
       walletBalance={balance}
+      prefs={prefs}
       eyebrow="Trust layer"
       title="Escrow transactions"
     >
@@ -85,7 +82,7 @@ export default async function EscrowIndexPage({
                   </p>
                   <p className="mt-1 text-sm text-[#5d736a]">{transaction.id}</p>
                 </div>
-                <StatusPill status={transaction.status} />
+                <StatusPill status={transaction.status} lang={prefs.lang} />
               </div>
 
               <dl className="mt-5 grid grid-cols-2 gap-3 text-sm">
@@ -100,23 +97,70 @@ export default async function EscrowIndexPage({
                 <div className="rounded-2xl bg-[#f8faf8] p-3">
                   <dt className="text-xs uppercase tracking-[0.16em] text-[#5d736a]">Escrow</dt>
                   <dd className="mt-1 font-medium text-[#18352d]">
-                    {formatCents(transaction.amountCents)}
+                    {formatCents(transaction.amountCents, prefs)}
                   </dd>
                 </div>
                 <div className="rounded-2xl bg-[#f8faf8] p-3">
                   <dt className="text-xs uppercase tracking-[0.16em] text-[#5d736a]">Updated</dt>
                   <dd className="mt-1 font-medium text-[#18352d]">
-                    {formatDate(transaction.updatedAt)}
+                    {formatDate(transaction.updatedAt, prefs)}
                   </dd>
                 </div>
               </dl>
 
               <p className="mt-4 text-sm text-[#5d736a]">
-                {getEscrowStatusLabel(transaction.status)}
+                {getEscrowStatusLabel(transaction.status, prefs.lang)}
                 {transaction.trackingNumber ? ` · ${transaction.trackingNumber}` : ""}
               </p>
             </Link>
           ))}
+
+          {loadMoreCursor ? (
+            <LoadMoreTransactions
+              initialCursor={loadMoreCursor}
+              className="contents"
+            >
+              {(item) => (
+                <Link
+                  key={item.id}
+                  href={`/escrow/${item.id}`}
+                  className="rounded-3xl border border-[#dfece5] bg-white p-6 shadow-[0_16px_30px_rgba(24,53,45,0.05)] transition hover:border-[#bfd4c8]"
+                >
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <p className="truncate text-lg font-semibold text-[#18352d]">
+                        {item.itemName}
+                      </p>
+                      <p className="mt-1 text-sm text-[#5d736a]">{item.id}</p>
+                    </div>
+                    <StatusPill status={item.status as EscrowStatus} lang={prefs.lang} />
+                  </div>
+                  <dl className="mt-5 grid grid-cols-2 gap-3 text-sm">
+                    <div className="rounded-2xl bg-[#f8faf8] p-3">
+                      <dt className="text-xs uppercase tracking-[0.16em] text-[#5d736a]">Buyer</dt>
+                      <dd className="mt-1 font-medium text-[#18352d]">{item.buyerName}</dd>
+                    </div>
+                    <div className="rounded-2xl bg-[#f8faf8] p-3">
+                      <dt className="text-xs uppercase tracking-[0.16em] text-[#5d736a]">Seller</dt>
+                      <dd className="mt-1 font-medium text-[#18352d]">{item.sellerName}</dd>
+                    </div>
+                    <div className="rounded-2xl bg-[#f8faf8] p-3">
+                      <dt className="text-xs uppercase tracking-[0.16em] text-[#5d736a]">Escrow</dt>
+                      <dd className="mt-1 font-medium text-[#18352d]">
+                        {formatCents(item.amountCents, prefs)}
+                      </dd>
+                    </div>
+                    <div className="rounded-2xl bg-[#f8faf8] p-3">
+                      <dt className="text-xs uppercase tracking-[0.16em] text-[#5d736a]">Updated</dt>
+                      <dd className="mt-1 font-medium text-[#18352d]">
+                        {formatDate(new Date(item.updatedAt), prefs)}
+                      </dd>
+                    </div>
+                  </dl>
+                </Link>
+              )}
+            </LoadMoreTransactions>
+          ) : null}
         </div>
       )}
     </WorkspaceShell>

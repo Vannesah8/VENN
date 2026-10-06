@@ -15,11 +15,11 @@ const BUYER: EscrowActor = { id: "buyer_1", displayName: "Aisha Mwangi", role: "
 
 let db: Db;
 
-function freshDatabase(): void {
-  db = openDatabase(":memory:");
+async function freshDatabase(): Promise<void> {
+  db = await openDatabase(":memory:");
   setDatabase(db);
 
-  createUser(
+  await createUser(
     {
       id: BUYER.id,
       displayName: BUYER.displayName,
@@ -31,36 +31,36 @@ function freshDatabase(): void {
   );
 }
 
-test("a session record resolves to the actor and can be deleted", (t) => {
-  freshDatabase();
-  t.after(() => db.close());
+test("a session record resolves to the actor and can be deleted", async (t) => {
+  await freshDatabase();
+  t.after(async () => db.close());
 
-  const { token } = createSessionRecord(BUYER.id, db);
+  const { token } = await createSessionRecord(BUYER.id, db);
 
-  assert.deepEqual(getUserBySessionToken(token, db), BUYER);
+  assert.deepEqual(await getUserBySessionToken(token, db), BUYER);
 
-  deleteSessionByToken(token, db);
-  assert.equal(getUserBySessionToken(token, db), null);
+  await deleteSessionByToken(token, db);
+  assert.equal(await getUserBySessionToken(token, db), null);
 });
 
-test("an unknown token resolves to no actor", (t) => {
-  freshDatabase();
-  t.after(() => db.close());
+test("an unknown token resolves to no actor", async (t) => {
+  await freshDatabase();
+  t.after(async () => db.close());
 
-  assert.equal(getUserBySessionToken("deadbeef", db), null);
+  assert.equal(await getUserBySessionToken("deadbeef", db), null);
 });
 
-test("an expired session is rejected and pruned", (t) => {
-  freshDatabase();
-  t.after(() => db.close());
+test("an expired session is rejected and pruned", async (t) => {
+  await freshDatabase();
+  t.after(async () => db.close());
 
-  const { token } = createSessionRecord(BUYER.id, db);
+  const { token } = await createSessionRecord(BUYER.id, db);
 
-  db.prepare("UPDATE sessions SET expires_at = ?").run(new Date(0).toISOString());
+  await db.run("UPDATE sessions SET expires_at = ?", [new Date(0).toISOString()]);
 
-  assert.equal(getUserBySessionToken(token, db), null);
+  assert.equal(await getUserBySessionToken(token, db), null);
   assert.equal(
-    (db.prepare("SELECT COUNT(*) AS count FROM sessions").get() as { count: number }).count,
+    (await db.get<{ count: number }>("SELECT COUNT(*) AS count FROM sessions"))?.count ?? 0,
     0,
   );
 });

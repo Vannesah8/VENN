@@ -6,7 +6,7 @@ import type {
   EscrowStatus,
 } from "@/lib/escrow";
 import { hashPassword } from "@/lib/auth";
-import { getDatabase } from "@/lib/db";
+import { getDatabase, type Db } from "@/lib/db";
 import {
   applyActionToTransaction,
   createTransaction,
@@ -19,13 +19,62 @@ export const DEMO_PASSWORD = "venn-demo";
 const STARTING_BALANCE_CENTS = 500_000;
 
 const USERS = [
-  { id: "usr_buyer_aisha", displayName: "Aisha Mwangi", role: "buyer" },
-  { id: "usr_buyer_juma", displayName: "Juma Otieno", role: "buyer" },
-  { id: "usr_seller_keisha", displayName: "Keisha Trading Co.", role: "seller" },
-  { id: "usr_seller_kofi", displayName: "Kofi Mensah", role: "seller" },
-  { id: "usr_carrier_fedex", displayName: "FedEx Lagos Hub", role: "carrier" },
-  { id: "usr_carrier_dhl", displayName: "DHL Nairobi", role: "carrier" },
-  { id: "usr_support", displayName: "Venn Support", role: "mediator" },
+  {
+    id: "usr_buyer_aisha",
+    displayName: "Aisha Mwangi",
+    role: "buyer" as const,
+    phone: "+254712000001",
+    lang: "en" as const,
+    currency: "KES" as const,
+  },
+  {
+    id: "usr_buyer_juma",
+    displayName: "Juma Otieno",
+    role: "buyer" as const,
+    phone: "+254712000002",
+    lang: "sw" as const,
+    currency: "KES" as const,
+  },
+  {
+    id: "usr_seller_keisha",
+    displayName: "Keisha Trading Co.",
+    role: "seller" as const,
+    phone: "+254712000003",
+    lang: "en" as const,
+    currency: "KES" as const,
+  },
+  {
+    id: "usr_seller_kofi",
+    displayName: "Kofi Mensah",
+    role: "seller" as const,
+    phone: "+254712000004",
+    lang: "en" as const,
+    currency: "KES" as const,
+  },
+  {
+    id: "usr_carrier_fedex",
+    displayName: "FedEx Lagos Hub",
+    role: "carrier" as const,
+    phone: "+254712000005",
+    lang: "en" as const,
+    currency: "KES" as const,
+  },
+  {
+    id: "usr_carrier_dhl",
+    displayName: "DHL Nairobi",
+    role: "carrier" as const,
+    phone: "+254712000006",
+    lang: "en" as const,
+    currency: "KES" as const,
+  },
+  {
+    id: "usr_support",
+    displayName: "Venn Support",
+    role: "mediator" as const,
+    phone: "+254712000007",
+    lang: "en" as const,
+    currency: "KES" as const,
+  },
 ] as const;
 
 const BUYER_AISHA: EscrowActor = {
@@ -90,24 +139,24 @@ function toPayload(step: SeedStep): EscrowActionPayload {
     : { action: step.action, input: { note: step.note } };
 }
 
-function run(actor: EscrowActor, id: string, steps: SeedStep[]): void {
+async function run(actor: EscrowActor, id: string, steps: SeedStep[], db: Db): Promise<void> {
   for (const step of steps) {
-    applyActionToTransaction(id, actor, toPayload(step));
+    await applyActionToTransaction(id, actor, toPayload(step), db);
   }
 }
 
-export function seed(reset = false): void {
-  const db = getDatabase();
+export async function seed(reset = false): Promise<void> {
+  const db = await getDatabase();
 
   if (reset) {
-    db.exec(
-      "DELETE FROM ledger_entries; DELETE FROM ledger_accounts; DELETE FROM escrow_events; DELETE FROM transactions; DELETE FROM sessions; DELETE FROM users;",
+    await db.exec(
+      "DELETE FROM ledger_entries; DELETE FROM ledger_accounts; DELETE FROM escrow_events; DELETE FROM transactions; DELETE FROM sessions; DELETE FROM users; DELETE FROM notifications; DELETE FROM outbox; DELETE FROM otp_codes;",
     );
   }
 
-  const existing = db.prepare("SELECT COUNT(*) AS count FROM transactions").get() as {
-    count: number;
-  };
+  const existing = (await db.get<{ count: number }>(
+    "SELECT COUNT(*) AS count FROM transactions",
+  )) ?? { count: 0 };
 
   if (existing.count > 0 && !reset) {
     console.log("Transactions already present. Re-run with --reset to rebuild the demo set.");
@@ -115,19 +164,22 @@ export function seed(reset = false): void {
   }
 
   for (const user of USERS) {
-    createUser(
+    await createUser(
       {
         id: user.id,
         displayName: user.displayName,
         role: user.role,
         email: `${user.id.replace(/^usr_/, "")}@venn.demo`,
         passwordHash: hashPassword(DEMO_PASSWORD),
+        phone: user.phone,
+        lang: user.lang,
+        currency: user.currency,
       },
       db,
     );
 
     if (user.role === "buyer") {
-      depositWalletFunds(
+      await depositWalletFunds(
         user.id,
         STARTING_BALANCE_CENTS,
         "Seeded starting wallet balance",
@@ -136,76 +188,92 @@ export function seed(reset = false): void {
     }
   }
 
-  const released = createTransaction(
+  const released = await createTransaction(
     { buyerId: BUYER_AISHA.id, sellerId: SELLER_KEISHA.id, itemName: "Vintage camera lens", amountCents: 124_000 },
     BUYER_AISHA,
     db,
   );
-  run(SELLER_KEISHA, released.id, [{ action: "dispatch", input: FEDEX_SHIPMENT }]);
-  run(CARRIER_FEDEX, released.id, [{ action: "scan_in_transit" }]);
-  run(CARRIER_FEDEX, released.id, [{ action: "confirm_delivery" }]);
-  run(BUYER_AISHA, released.id, [{ action: "release_funds", note: "Lens arrived exactly as described." }]);
+  await run(SELLER_KEISHA, released.id, [{ action: "dispatch", input: FEDEX_SHIPMENT }], db);
+  await run(CARRIER_FEDEX, released.id, [{ action: "scan_in_transit" }], db);
+  await run(CARRIER_FEDEX, released.id, [{ action: "confirm_delivery" }], db);
+  await run(BUYER_AISHA, released.id, [{ action: "release_funds", note: "Lens arrived exactly as described." }], db);
 
-  const delivered = createTransaction(
+  const delivered = await createTransaction(
     { buyerId: BUYER_AISHA.id, sellerId: SELLER_KOFI.id, itemName: "Leica M6 rangefinder", amountCents: 289_000 },
     BUYER_AISHA,
     db,
   );
-  run(SELLER_KOFI, delivered.id, [{ action: "dispatch", input: DHL_SHIPMENT }]);
-  run(SELLER_KOFI, delivered.id, [{ action: "scan_in_transit" }]);
-  run(SELLER_KOFI, delivered.id, [{ action: "confirm_delivery" }]);
+  await run(SELLER_KOFI, delivered.id, [{ action: "dispatch", input: DHL_SHIPMENT }], db);
+  await run(SELLER_KOFI, delivered.id, [{ action: "scan_in_transit" }], db);
+  await run(SELLER_KOFI, delivered.id, [{ action: "confirm_delivery" }], db);
 
-  const inTransit = createTransaction(
+  const inTransit = await createTransaction(
     { buyerId: OTHER_BUYER.id, sellerId: SELLER_KEISHA.id, itemName: "Gaming headset", amountCents: 36_000 },
     OTHER_BUYER,
     db,
   );
-  run(SELLER_KEISHA, inTransit.id, [{ action: "dispatch", input: FEDEX_SHIPMENT }]);
-  run(CARRIER_FEDEX, inTransit.id, [{ action: "scan_in_transit" }]);
+  await run(SELLER_KEISHA, inTransit.id, [{ action: "dispatch", input: FEDEX_SHIPMENT }], db);
+  await run(CARRIER_FEDEX, inTransit.id, [{ action: "scan_in_transit" }], db);
 
-  const disputed = createTransaction(
+  const disputed = await createTransaction(
     { buyerId: OTHER_BUYER.id, sellerId: SELLER_KOFI.id, itemName: "Smart watch", amountCents: 42_000 },
     OTHER_BUYER,
     db,
   );
-  run(SELLER_KOFI, disputed.id, [{ action: "dispatch", input: DHL_SHIPMENT }]);
-  run(SELLER_KOFI, disputed.id, [{ action: "scan_in_transit" }]);
-  run(SELLER_KOFI, disputed.id, [{ action: "confirm_delivery" }]);
-  run(OTHER_BUYER, disputed.id, [
+  await run(SELLER_KOFI, disputed.id, [{ action: "dispatch", input: DHL_SHIPMENT }], db);
+  await run(SELLER_KOFI, disputed.id, [{ action: "scan_in_transit" }], db);
+  await run(SELLER_KOFI, disputed.id, [{ action: "confirm_delivery" }], db);
+  await run(OTHER_BUYER, disputed.id, [
     { action: "open_dispute", note: "Watch arrived with a cracked screen." },
-  ]);
+  ], db);
 
-  const resolved = createTransaction(
+  const resolved = await createTransaction(
     { buyerId: OTHER_BUYER.id, sellerId: SELLER_KEISHA.id, itemName: "Film scanner", amountCents: 18_500 },
     OTHER_BUYER,
     db,
   );
-  run(SELLER_KEISHA, resolved.id, [{ action: "dispatch", input: FEDEX_SHIPMENT }]);
-  run(CARRIER_FEDEX, resolved.id, [{ action: "scan_in_transit" }]);
-  run(CARRIER_FEDEX, resolved.id, [{ action: "confirm_delivery" }]);
-  run(OTHER_BUYER, resolved.id, [{ action: "open_dispute", note: "Wrong adapter shipped." }]);
-  run(SUPPORT, resolved.id, [{ action: "resolve_dispute", note: "Adapter sent separately, case closed." }]);
+  await run(SELLER_KEISHA, resolved.id, [{ action: "dispatch", input: FEDEX_SHIPMENT }], db);
+  await run(CARRIER_FEDEX, resolved.id, [{ action: "scan_in_transit" }], db);
+  await run(CARRIER_FEDEX, resolved.id, [{ action: "confirm_delivery" }], db);
+  await run(OTHER_BUYER, resolved.id, [{ action: "open_dispute", note: "Wrong adapter shipped." }], db);
+  await run(SUPPORT, resolved.id, [{ action: "resolve_dispute", note: "Adapter sent separately, case closed." }], db);
 
-  const funded = createTransaction(
+  const funded = await createTransaction(
     { buyerId: BUYER_AISHA.id, sellerId: SELLER_KEISHA.id, itemName: "Lightroom presets bundle", amountCents: 4_900 },
     BUYER_AISHA,
     db,
   );
 
-  const rows = db
-    .prepare("SELECT item_name, status FROM transactions ORDER BY created_at ASC")
-    .all() as Array<{ item_name: string; status: EscrowStatus }>;
+  await processSeedNotifications(db);
+
+  const rows = (await db.all<{ item_name: string; status: EscrowStatus }>(
+    "SELECT item_name, status FROM transactions ORDER BY created_at ASC",
+  )) as Array<{ item_name: string; status: EscrowStatus }>;
 
   console.log(`Seeded ${USERS.length} accounts and ${rows.length} transactions:`);
   for (const row of rows) {
     console.log(`  ${row.item_name.padEnd(28)} ${row.status}`);
   }
   console.log(`\nFunded but not shipped: ${funded.id}`);
-  console.log(`Sign in at /login with any account (password: ${DEMO_PASSWORD}) to explore the flow.`);
+  console.log(`Sign in at /login with any account (password: ${DEMO_PASSWORD}) or phone OTP to explore.`);
+}
+
+export async function processSeedNotifications(db: Db): Promise<void> {
+  const { processNotifications } = await import("@/lib/notifications");
+  await processNotifications(db);
 }
 
 const isEntryPoint = process.argv[1]?.includes("seed");
 
 if (isEntryPoint) {
-  seed(process.argv.includes("--reset"));
+  const main = async (): Promise<void> => {
+    await seed(process.argv.includes("--reset"));
+  };
+  main().then(
+    () => process.exit(0),
+    (error) => {
+      console.error(error);
+      process.exit(1);
+    },
+  );
 }

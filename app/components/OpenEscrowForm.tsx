@@ -4,19 +4,27 @@ import { useActionState } from "react";
 
 import { openEscrow } from "@/app/actions";
 import { IDLE_ACTION_STATE } from "@/lib/action-state";
+import { t, type LocalePrefs } from "@/lib/i18n";
 
 export interface SellerOption {
   id: string;
   displayName: string;
 }
 
-export function OpenEscrowForm({ sellers }: { sellers: SellerOption[] }) {
+export function OpenEscrowForm({
+  sellers,
+  prefs,
+}: {
+  sellers: SellerOption[];
+  prefs: LocalePrefs;
+}) {
   const [state, formAction, pending] = useActionState(openEscrow, IDLE_ACTION_STATE);
+  const lang = prefs.lang;
 
   if (sellers.length === 0) {
     return (
       <p className="rounded-2xl border border-[#edf3ee] bg-[#f8faf8] p-4 text-sm text-[#5d736a]">
-        No seller accounts are available to trade with yet.
+        {t(lang, "form.noSellers")}
       </p>
     );
   }
@@ -33,7 +41,7 @@ export function OpenEscrowForm({ sellers }: { sellers: SellerOption[] }) {
       ) : null}
 
       <label className="block text-sm text-[#5d736a]">
-        Seller
+        {t(lang, "form.seller")}
         <select
           name="sellerId"
           required
@@ -41,7 +49,7 @@ export function OpenEscrowForm({ sellers }: { sellers: SellerOption[] }) {
           className="mt-1 w-full rounded-xl border border-[#dfece5] bg-white px-3 py-2 text-sm text-[#18352d]"
         >
           <option value="" disabled>
-            Select a seller
+            {t(lang, "form.selectSeller")}
           </option>
           {sellers.map((seller) => (
             <option key={seller.id} value={seller.id}>
@@ -52,7 +60,7 @@ export function OpenEscrowForm({ sellers }: { sellers: SellerOption[] }) {
       </label>
 
       <label className="block text-sm text-[#5d736a]">
-        Item
+        {t(lang, "form.item")}
         <input
           name="itemName"
           required
@@ -62,7 +70,7 @@ export function OpenEscrowForm({ sellers }: { sellers: SellerOption[] }) {
       </label>
 
       <label className="block text-sm text-[#5d736a]">
-        Amount (USD)
+        {t(lang, "form.amount", { currency: prefs.currency })}
         <input
           name="amount"
           required
@@ -77,7 +85,7 @@ export function OpenEscrowForm({ sellers }: { sellers: SellerOption[] }) {
         disabled={pending}
         className="rounded-full bg-[#1e4d3d] px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-[#123a30] disabled:cursor-not-allowed disabled:opacity-60"
       >
-        {pending ? "Funding escrow..." : "Fund escrow"}
+        {pending ? t(lang, "form.fundingEscrow") : t(lang, "form.fundEscrow")}
       </button>
     </form>
   );

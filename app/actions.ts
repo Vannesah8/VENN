@@ -12,7 +12,12 @@ import {
   EscrowError,
   isEscrowAction,
 } from "@/lib/escrow";
+import { isLang, isCurrency } from "@/lib/i18n";
 import { parseAmountToCents } from "@/lib/money";
+import { processNotifications } from "@/lib/notifications";
+import { issueOtp, normalizePhone, verifyOtp } from "@/lib/otp";
+import { setPrefsCookie } from "@/lib/prefs";
+import { consumeRateLimit, rateLimitError, type RateLimitResult } from "@/lib/rate-limit";
 import { createSession, destroySession, requireActor } from "@/lib/session";
 import {
   applyActionToTransaction,
@@ -21,6 +26,8 @@ import {
   createUser,
   depositWalletFunds,
   getUserByEmail,
+  getUserByPhone,
+  updateUserPrefs,
 } from "@/lib/transactions";
 
 const AUTH_ROLES: readonly EscrowRole[] = ["buyer", "seller"];
@@ -44,10 +51,76 @@ export async function loginUser(
   const email = String(formData.get("email") ?? "").trim().toLowerCase();
   const password = String(formData.get("password") ?? "");
 
-  const user = getUserByEmail(email);
+  const limit = await consumeRateLimit(email, { limit: 10, windowMs: 15 * 60 * 1000 });
+  if (!limit.allowed) {
+    return (await deniedState(limit))!;
+  }
+
+  const user = await getUserByEmail(email);
 
   if (!user || !user.passwordHash || !verifyPassword(password, user.passwordHash)) {
     return { error: "Invalid email or password", status: "invalid_credentials" };
+  }
+
+  await createSession(user.id);
+  revalidatePath("/", "layout");
+  redirect("/dashboard");
+}
+
+export async function sendOtpLogin(
+  _prev: ActionState,
+  formData: FormData,
+): Promise<ActionState & { demoCode?: string }> {
+  const phone = normalizePhone(String(formData.get("phone") ?? ""));
+
+  const limit = await consumeRateLimit(phone, { limit: 5, windowMs: 15 * 60 * 1000 });
+  if (!limit.allowed) {
+    return (await deniedState(limit))!;
+  }
+
+  try {
+    const result = await issueOtp(phone, "login");
+    if (result.demoCode) {
+      console.log(`[sms:demo] Sending login code ${result.demoCode} to ${phone}`);
+    }
+
+    return { error: null, status: "otp_sent", demoCode: result.demoCode };
+  } catch (error) {
+    return toActionState(error);
+  }
+}
+
+async function deniedState(limit: RateLimitResult): Promise<ActionState | null> {
+  return rateLimitError(limit.allowed, limit.retryAfterMs);
+}
+
+export async function otpLogin(
+  _prev: ActionState,
+  formData: FormData,
+): Promise<ActionState> {
+  const phone = normalizePhone(String(formData.get("phone") ?? ""));
+  const code = String(formData.get("code") ?? "");
+
+  const ok = await verifyOtp(phone, code, "login");
+
+  if (!ok) {
+    return { error: "That code is invalid or has expired", status: "invalid_credentials" };
+  }
+
+  let user = await getUserByPhone(phone);
+
+  if (!user) {
+    const last4 = phone.slice(-4);
+    user = await createUser({
+      id: createUserId(),
+      displayName: `Phone user  ••${last4}`,
+      role: "buyer",
+      email: `phone-${last4}-${phone.length}@venn.demo`,
+      passwordHash: null,
+      phone,
+      lang: "en",
+      currency: "KES",
+    });
   }
 
   await createSession(user.id);
@@ -63,6 +136,8 @@ export async function registerUser(
   const email = String(formData.get("email") ?? "").trim().toLowerCase();
   const password = String(formData.get("password") ?? "");
   const role = String(formData.get("role") ?? "buyer");
+  const rawPhone = String(formData.get("phone") ?? "").trim();
+  const phone = rawPhone ? normalizePhone(rawPhone) : null;
 
   if (displayName.length < 2) {
     return { error: "Your name must be at least 2 characters", status: "invalid_input" };
@@ -80,16 +155,21 @@ export async function registerUser(
     return { error: "Choose a buyer or seller account", status: "invalid_input" };
   }
 
-  if (getUserByEmail(email)) {
+  if (await getUserByEmail(email)) {
     return { error: "An account with that email already exists", status: "email_taken" };
   }
 
-  const user = createUser({
+  if (phone && (await getUserByPhone(phone))) {
+    return { error: "An account with that phone already exists", status: "phone_taken" };
+  }
+
+  const user = await createUser({
     id: createUserId(),
     displayName,
     role: role as EscrowRole,
     email,
     passwordHash: hashPassword(password),
+    phone,
   });
 
   await createSession(user.id);
@@ -111,7 +191,7 @@ export async function depositFunds(
 
   try {
     const amountCents = parseAmountToCents(String(formData.get("amount") ?? ""));
-    depositWalletFunds(actor.id, amountCents, "Deposit from the demo cash rail");
+    await depositWalletFunds(actor.id, amountCents, "Deposit from the demo cash rail");
 
     revalidatePath("/dashboard");
 
@@ -134,7 +214,8 @@ export async function runEscrowAction(
       throw new EscrowError("invalid_input", "A transaction and a valid action are required");
     }
 
-    applyActionToTransaction(transactionId, actor, buildPayload(action, formData));
+    await applyActionToTransaction(transactionId, actor, buildPayload(action, formData));
+    await processNotifications();
 
     revalidatePath("/dashboard");
     revalidatePath("/escrow");
@@ -154,7 +235,7 @@ export async function openEscrow(
   let transactionId: string;
 
   try {
-    const transaction = createTransaction(
+    const transaction = await createTransaction(
       {
         buyerId: actor.id,
         sellerId: String(formData.get("sellerId") ?? ""),
@@ -163,6 +244,7 @@ export async function openEscrow(
       },
       actor,
     );
+    await processNotifications();
 
     transactionId = transaction.id;
   } catch (error) {
@@ -173,6 +255,26 @@ export async function openEscrow(
   revalidatePath("/escrow");
 
   redirect(`/escrow/${transactionId}`);
+}
+
+export async function setPrefs(input: {
+  lang?: string;
+  currency?: string;
+}): Promise<void> {
+  const actor = await requireActor();
+  const lang = isLang(input.lang) ? input.lang : undefined;
+  const currency = isCurrency(input.currency) ? input.currency : undefined;
+
+  if (lang && currency) {
+    await updateUserPrefs(actor.id, { lang, currency });
+  }
+
+  await setPrefsCookie({
+    lang: lang ?? "en",
+    currency: currency ?? "KES",
+  });
+
+  revalidatePath("/", "layout");
 }
 
 function buildPayload(action: EscrowAction, formData: FormData): EscrowActionPayload {

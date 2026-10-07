@@ -224,6 +224,67 @@ test("a dispute keeps the funds in escrow custody", async (t) => {
   assert.equal(await getWalletBalance(SELLER.id, db), 0);
 });
 
+test("refunding the buyer returns the escrow and persists the resolution", async (t) => {
+  await freshDatabase();
+  t.after(async () => db.close());
+
+  const { id, amountCents } = await newEscrow();
+  const buyerBefore = await getWalletBalance(BUYER.id, db);
+
+  await applyActionToTransaction(id, SELLER, { action: "dispatch", input: { ...SHIPMENT } }, db);
+  await applyActionToTransaction(id, CARRIER, { action: "scan_in_transit" }, db);
+  await applyActionToTransaction(id, CARRIER, { action: "confirm_delivery" }, db);
+  await applyActionToTransaction(id, BUYER, {
+    action: "open_dispute",
+    input: { note: "Wrong item received" },
+  }, db);
+  await applyActionToTransaction(id, MEDIATOR, {
+    action: "refund_buyer",
+    input: { note: "Sides agreed" },
+  }, db);
+
+  const stored = (await getTransactionById(id, db))!;
+  assert.equal(stored.status, "released");
+  assert.equal(stored.resolution, "refunded");
+  assert.equal(stored.disputeFromStatus, null);
+
+  assert.equal(await getEscrowAccountBalance(id, db), 0);
+  assert.equal(await getWalletBalance(BUYER.id, db), buyerBefore + amountCents);
+
+  const entries = await getEscrowLedgerEntries(id, db);
+  assert.ok(entries.some((entry) => entry.entryType === "escrow_refund"));
+});
+
+test("scan actions persist shipment scans with their details", async (t) => {
+  await freshDatabase();
+  t.after(async () => db.close());
+
+  const { id } = await newEscrow();
+  await applyActionToTransaction(id, SELLER, { action: "dispatch", input: { ...SHIPMENT } }, db);
+  await applyActionToTransaction(id, CARRIER, { action: "scan_in_transit" }, db);
+  await applyActionToTransaction(id, CARRIER, {
+    action: "scan_milestone",
+    input: { milestone: "at_depot", location: "Nairobi Depot", note: "sorted" },
+  }, db);
+
+  const rows = await db.all<{
+    action: string;
+    milestone: string | null;
+    location: string | null;
+    actor_name: string;
+  }>(
+    "SELECT action, milestone, location, actor_name FROM shipment_scans WHERE transaction_id = ? ORDER BY id",
+    [id],
+  );
+
+  assert.equal(rows.length, 2);
+  assert.equal(rows[0].action, "scan_in_transit");
+  assert.equal(rows[1].action, "scan_milestone");
+  assert.equal(rows[1].milestone, "at_depot");
+  assert.equal(rows[1].location, "Nairobi Depot");
+  assert.equal(rows[1].actor_name, CARRIER.displayName);
+});
+
 test("the full lifecycle appends an audit trail", async (t) => {
   await freshDatabase();
   t.after(async () => db.close());
@@ -403,6 +464,31 @@ test("pageTransactionsForActor paginates without skipping rows", async (t) => {
   assert.equal(new Set(ids).size, 3);
 });
 
+test("pageTransactionsForActor filters and searches", async (t) => {
+  await freshDatabase();
+  t.after(async () => db.close());
+
+  const paid = await newEscrow("Paid lens", 10_000);
+  const inFlight = await newEscrow("In-flight bag", 20_000);
+
+  await applyActionToTransaction(paid.id, SELLER, { action: "dispatch", input: { ...SHIPMENT } }, db);
+  await applyActionToTransaction(paid.id, CARRIER, { action: "scan_in_transit" }, db);
+  await applyActionToTransaction(paid.id, CARRIER, { action: "confirm_delivery" }, db);
+  await applyActionToTransaction(paid.id, BUYER, { action: "release_funds" }, db);
+
+  await applyActionToTransaction(inFlight.id, SELLER, { action: "dispatch", input: { ...SHIPMENT } }, db);
+  await applyActionToTransaction(inFlight.id, CARRIER, { action: "scan_in_transit" }, db);
+
+  const released = await pageTransactionsForActor(BUYER, { filter: "released" }, db);
+  assert.deepEqual(released.transactions.map((entry) => entry.id), [paid.id]);
+
+  const held = await pageTransactionsForActor(BUYER, { filter: "held" }, db);
+  assert.deepEqual(held.transactions.map((entry) => entry.id), [inFlight.id]);
+
+  const searched = await pageTransactionsForActor(BUYER, { query: "in-flight" }, db);
+  assert.deepEqual(searched.transactions.map((entry) => entry.id), [inFlight.id]);
+});
+
 test("getPortfolioStats splits held from released funds", () => {
   const at = (status: EscrowStatus, amountCents: number): EscrowTransaction => ({
     id: `txn_${status}`,
@@ -411,12 +497,15 @@ test("getPortfolioStats splits held from released funds", () => {
     carrierId: null,
     itemName: "Item",
     amountCents,
+    currency: "KES",
     status,
     trackingNumber: null,
     carrierName: null,
     origin: null,
     destination: null,
     disputeReason: null,
+    disputeFromStatus: null,
+    resolution: null,
     createdAt: new Date(0),
     updatedAt: new Date(0),
   });

@@ -253,11 +253,23 @@ test("the buyer disputes and a mediator returns the order for confirmation", () 
   assert.equal(applyEscrowAction(resolved, BUYER, { action: "release_funds" }).status, "released");
 });
 
-test("a dispute cannot be opened before delivery", () => {
+test("a dispute cannot be opened before the parcel ships", () => {
   assertEscrowError(
-    () => applyEscrowAction(dispatched(), BUYER, { action: "open_dispute" }),
+    () => applyEscrowAction(funded(), BUYER, { action: "open_dispute" }),
     "illegal_transition",
   );
+});
+
+test("a dispute opened in transit resolves back to in transit", () => {
+  const inTransit = applyEscrowAction(dispatched(), CARRIER, { action: "scan_in_transit" });
+  const disputed = applyEscrowAction(inTransit, BUYER, { action: "open_dispute" });
+
+  assert.equal(disputed.status, "disputed");
+  assert.equal(disputed.disputeFromStatus, "in_transit");
+
+  const resolved = applyEscrowAction(disputed, MEDIATOR, { action: "resolve_dispute" });
+  assert.equal(resolved.status, "in_transit");
+  assert.equal(resolved.disputeFromStatus, null);
 });
 
 test("resolveParty identifies the acting side", () => {
@@ -289,14 +301,18 @@ test("availableActions follows the machine and the actor role", () => {
   assert.deepEqual(availableActions(dispatched(), CARRIER), ["scan_in_transit"]);
 
   const inTransit = applyEscrowAction(dispatched(), CARRIER, { action: "scan_in_transit" });
-  assert.deepEqual(availableActions(inTransit, CARRIER), ["confirm_delivery"]);
+  assert.deepEqual(availableActions(inTransit, CARRIER), ["scan_milestone", "confirm_delivery"]);
 
-  assert.deepEqual(availableActions(delivered(), BUYER), ["release_funds", "open_dispute"]);
+  assert.deepEqual(availableActions(delivered(), BUYER), [
+    "confirm_receipt",
+    "release_funds",
+    "open_dispute",
+  ]);
   assert.deepEqual(availableActions(delivered(), SELLER), []);
   assert.deepEqual(availableActions(delivered(), STRANGER), []);
 
   const disputed = applyEscrowAction(delivered(), BUYER, { action: "open_dispute" });
-  assert.deepEqual(availableActions(disputed, MEDIATOR), ["resolve_dispute"]);
+  assert.deepEqual(availableActions(disputed, MEDIATOR), ["resolve_dispute", "refund_buyer"]);
   assert.deepEqual(availableActions(disputed, CARRIER), []);
 });
 

@@ -1,4 +1,4 @@
-import { t, type Lang, type MessageKey } from "@/lib/i18n";
+import { t, type Currency, type Lang, type MessageKey } from "@/lib/i18n";
 
 export const ESCROW_ROLES = ["buyer", "seller", "carrier", "mediator"] as const;
 export type EscrowRole = (typeof ESCROW_ROLES)[number];
@@ -16,12 +16,30 @@ export type EscrowStatus = (typeof ESCROW_STATUSES)[number];
 export const ESCROW_ACTIONS = [
   "dispatch",
   "scan_in_transit",
+  "scan_milestone",
   "confirm_delivery",
+  "confirm_receipt",
   "release_funds",
   "open_dispute",
   "resolve_dispute",
+  "refund_buyer",
 ] as const;
 export type EscrowAction = (typeof ESCROW_ACTIONS)[number];
+
+export const SCAN_MILESTONES = [
+  "picked_up",
+  "at_depot",
+  "out_for_delivery",
+  "attempted_delivery",
+] as const;
+export type ScanMilestone = (typeof SCAN_MILESTONES)[number];
+
+export function isScanMilestone(value: unknown): value is ScanMilestone {
+  return typeof value === "string" && (SCAN_MILESTONES as readonly string[]).includes(value);
+}
+
+export const ESCROW_RESOLUTIONS = ["paid", "refunded"] as const;
+export type EscrowResolution = (typeof ESCROW_RESOLUTIONS)[number];
 
 export type EscrowParty = "buyer" | "seller" | "carrier" | "mediator";
 
@@ -57,12 +75,15 @@ export interface EscrowTransaction {
   carrierId: string | null;
   itemName: string;
   amountCents: number;
+  currency: Currency;
   status: EscrowStatus;
   trackingNumber: string | null;
   carrierName: string | null;
   origin: string | null;
   destination: string | null;
   disputeReason: string | null;
+  disputeFromStatus: EscrowStatus | null;
+  resolution: EscrowResolution | null;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -85,6 +106,7 @@ export interface CreateTransactionInput {
   sellerId: string;
   itemName: string;
   amountCents: number;
+  currency?: Currency;
 }
 
 export interface DispatchInput {
@@ -95,9 +117,17 @@ export interface DispatchInput {
   destination: string;
 }
 
+export interface ScanInput {
+  note?: string;
+  milestone?: string;
+  location?: string;
+  photoUrl?: string;
+}
+
 export type EscrowActionPayload =
   | { action: "dispatch"; input: DispatchInput }
-  | { action: Exclude<EscrowAction, "dispatch">; input?: { note?: string } };
+  | { action: "scan_in_transit" | "scan_milestone"; input?: ScanInput }
+  | { action: Exclude<EscrowAction, "dispatch" | "scan_in_transit" | "scan_milestone">; input?: { note?: string } };
 
 interface ActionRule {
   from: readonly EscrowStatus[];
@@ -122,12 +152,26 @@ const ACTION_RULES: Record<EscrowAction, ActionRule> = {
     label: "Mark in transit",
     description: "Log the first carrier scan on the parcel.",
   },
+  scan_milestone: {
+    from: ["in_transit"],
+    to: "in_transit",
+    parties: ["seller", "carrier"],
+    label: "Log a scan",
+    description: "Record where the parcel is right now — depot, van, or out for delivery.",
+  },
   confirm_delivery: {
     from: ["in_transit"],
     to: "delivered",
     parties: ["seller", "carrier"],
     label: "Confirm delivery",
     description: "Record that the parcel reached the buyer.",
+  },
+  confirm_receipt: {
+    from: ["delivered"],
+    to: "delivered",
+    parties: ["buyer"],
+    label: "Confirm you received it",
+    description: "Buyer acknowledges the parcel in hand before money moves.",
   },
   release_funds: {
     from: ["delivered"],
@@ -137,7 +181,7 @@ const ACTION_RULES: Record<EscrowAction, ActionRule> = {
     description: "Buyer confirms the item and escrow pays the seller.",
   },
   open_dispute: {
-    from: ["delivered"],
+    from: ["shipped", "in_transit", "delivered"],
     to: "disputed",
     parties: ["buyer"],
     label: "Open dispute",
@@ -148,7 +192,14 @@ const ACTION_RULES: Record<EscrowAction, ActionRule> = {
     to: "delivered",
     parties: ["mediator"],
     label: "Resolve dispute",
-    description: "Mediator closes the case and returns the order to the buyer.",
+    description: "Support closes the case and returns the order to the buyer.",
+  },
+  refund_buyer: {
+    from: ["disputed"],
+    to: "released",
+    parties: ["mediator"],
+    label: "Refund the buyer",
+    description: "Support closes the case and returns the escrow to the buyer.",
   },
 };
 
@@ -160,6 +211,19 @@ const STATUS_TONES: Record<EscrowStatus, "neutral" | "progress" | "positive" | "
   released: "positive",
   disputed: "warning",
 };
+
+/**
+ * `resolve_dispute` sends the order back to wherever it was when the case
+ * opened (a parcel disputed in transit goes back to in transit, not delivered),
+ * so the rule's static `to` is only the fallback for records written before the
+ * column existed.
+ */
+export function disputeResolutionTarget(transaction: EscrowTransaction): EscrowStatus {
+  if (transaction.disputeFromStatus && isEscrowStatus(transaction.disputeFromStatus)) {
+    return transaction.disputeFromStatus;
+  }
+  return "delivered";
+}
 
 export function isEscrowStatus(value: unknown): value is EscrowStatus {
   return typeof value === "string" && (ESCROW_STATUSES as readonly string[]).includes(value);
@@ -274,11 +338,14 @@ export function describeActions(
 ): DescribedAction[] {
   return availableActions(transaction, actor).map((action) => {
     const rule = ACTION_RULES[action];
+    const to =
+      action === "resolve_dispute" ? disputeResolutionTarget(transaction) : rule.to;
+
     return {
       action,
       label: t(lang, `action.${action}.label` as MessageKey),
       description: t(lang, `action.${action}.description` as MessageKey),
-      to: rule.to,
+      to,
       actionLabelKey: `action.${action}.label`,
       actionDescriptionKey: `action.${action}.description`,
     };
@@ -316,12 +383,15 @@ export function createEscrowTransaction(
     carrierId: null,
     itemName: input.itemName.trim(),
     amountCents: input.amountCents,
+    currency: input.currency ?? "KES",
     status: "escrow_funded",
     trackingNumber: null,
     carrierName: null,
     origin: null,
     destination: null,
     disputeReason: null,
+    disputeFromStatus: null,
+    resolution: null,
     createdAt: now,
     updatedAt: now,
   };
@@ -363,12 +433,49 @@ export function applyEscrowAction(
     return dispatch(transaction, payload.input, now);
   }
 
-  return {
-    ...transaction,
-    status: rule.to,
-    disputeReason: payload.action === "open_dispute" ? readNote(payload) : null,
-    updatedAt: now,
-  };
+  if (payload.action === "scan_in_transit" || payload.action === "scan_milestone") {
+    return { ...transaction, status: rule.to, updatedAt: now };
+  }
+
+  const base: EscrowTransaction = { ...transaction, updatedAt: now };
+
+  switch (payload.action) {
+    case "confirm_delivery":
+    case "confirm_receipt":
+      return { ...base, status: rule.to, disputeReason: null };
+
+    case "release_funds":
+      return { ...base, status: rule.to, resolution: "paid", disputeReason: null };
+
+    case "open_dispute":
+      return {
+        ...base,
+        status: rule.to,
+        disputeReason: readNote(payload),
+        disputeFromStatus: transaction.status,
+        resolution: null,
+      };
+
+    case "resolve_dispute":
+      return {
+        ...base,
+        status: disputeResolutionTarget(transaction),
+        disputeReason: null,
+        disputeFromStatus: null,
+        resolution: null,
+      };
+
+    case "refund_buyer":
+      return {
+        ...base,
+        status: "released",
+        disputeFromStatus: null,
+        resolution: "refunded",
+      };
+
+    default:
+      return { ...base, status: rule.to };
+  }
 }
 
 function dispatch(

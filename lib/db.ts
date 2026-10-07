@@ -53,20 +53,23 @@ CREATE TABLE IF NOT EXISTS sessions (
 );
 
 CREATE TABLE IF NOT EXISTS transactions (
-  id              TEXT PRIMARY KEY,
-  buyer_id        TEXT NOT NULL REFERENCES users(id),
-  seller_id       TEXT NOT NULL REFERENCES users(id),
-  carrier_id      TEXT REFERENCES users(id),
-  item_name       TEXT NOT NULL,
-  amount_cents    INTEGER NOT NULL CHECK (amount_cents > 0),
-  status          TEXT NOT NULL CHECK (status IN ('escrow_funded', 'shipped', 'in_transit', 'delivered', 'released', 'disputed')),
-  tracking_number TEXT,
-  carrier_name    TEXT,
-  origin          TEXT,
-  destination     TEXT,
-  dispute_reason  TEXT,
-  created_at      TEXT NOT NULL,
-  updated_at      TEXT NOT NULL
+  id                  TEXT PRIMARY KEY,
+  buyer_id            TEXT NOT NULL REFERENCES users(id),
+  seller_id           TEXT NOT NULL REFERENCES users(id),
+  carrier_id          TEXT REFERENCES users(id),
+  item_name           TEXT NOT NULL,
+  amount_cents        INTEGER NOT NULL CHECK (amount_cents > 0),
+  currency            TEXT NOT NULL DEFAULT 'KES',
+  status              TEXT NOT NULL CHECK (status IN ('escrow_funded', 'shipped', 'in_transit', 'delivered', 'released', 'disputed')),
+  tracking_number     TEXT,
+  carrier_name        TEXT,
+  origin              TEXT,
+  destination         TEXT,
+  dispute_reason      TEXT,
+  dispute_from_status TEXT,
+  resolution          TEXT,
+  created_at          TEXT NOT NULL,
+  updated_at          TEXT NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS escrow_events (
@@ -86,6 +89,7 @@ CREATE TABLE IF NOT EXISTS ledger_accounts (
   id                    TEXT PRIMARY KEY,
   kind                  TEXT NOT NULL CHECK (kind IN ('wallet', 'escrow')),
   owner_id              TEXT NOT NULL,
+  currency              TEXT NOT NULL DEFAULT 'KES',
   balance_snapshot_cents INTEGER NOT NULL DEFAULT 0,
   created_at            TEXT NOT NULL,
   UNIQUE (kind, owner_id)
@@ -95,7 +99,7 @@ CREATE TABLE IF NOT EXISTS ledger_entries (
   id           ${identity} PRIMARY KEY,
   account_id   TEXT NOT NULL REFERENCES ledger_accounts(id),
   delta_cents  INTEGER NOT NULL,
-  entry_type   TEXT NOT NULL CHECK (entry_type IN ('deposit', 'escrow_deposit', 'escrow_release')),
+  entry_type   TEXT NOT NULL CHECK (entry_type IN ('deposit', 'escrow_deposit', 'escrow_release', 'withdrawal', 'escrow_refund')),
   reference_id TEXT,
   note         TEXT,
   created_at   TEXT NOT NULL
@@ -122,12 +126,71 @@ CREATE TABLE IF NOT EXISTS outbox (
 );
 
 CREATE TABLE IF NOT EXISTS notifications (
-  id         ${identity} PRIMARY KEY,
-  user_id    TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-  title      TEXT NOT NULL,
-  body       TEXT NOT NULL,
-  read_at    TEXT,
-  created_at TEXT NOT NULL
+  id             ${identity} PRIMARY KEY,
+  user_id        TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  transaction_id TEXT,
+  title          TEXT NOT NULL,
+  body           TEXT NOT NULL,
+  read_at        TEXT,
+  created_at     TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS payment_intents (
+  id             TEXT PRIMARY KEY,
+  user_id        TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  kind           TEXT NOT NULL CHECK (kind IN ('deposit', 'withdrawal')),
+  amount_cents   INTEGER NOT NULL CHECK (amount_cents > 0),
+  currency       TEXT NOT NULL,
+  phone          TEXT,
+  provider       TEXT NOT NULL DEFAULT 'demo',
+  status         TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'completed', 'failed')),
+  reference      TEXT NOT NULL,
+  provider_ref   TEXT,
+  detail         TEXT,
+  created_at     TEXT NOT NULL,
+  updated_at     TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS shipment_scans (
+  id             ${identity} PRIMARY KEY,
+  transaction_id TEXT NOT NULL REFERENCES transactions(id) ON DELETE CASCADE,
+  actor_id       TEXT NOT NULL,
+  actor_name     TEXT NOT NULL,
+  action         TEXT NOT NULL,
+  milestone      TEXT,
+  location       TEXT,
+  photo_url      TEXT,
+  note           TEXT,
+  created_at     TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS transaction_messages (
+  id             ${identity} PRIMARY KEY,
+  transaction_id TEXT NOT NULL REFERENCES transactions(id) ON DELETE CASCADE,
+  author_id      TEXT NOT NULL,
+  author_name    TEXT NOT NULL,
+  author_role    TEXT NOT NULL,
+  kind           TEXT NOT NULL DEFAULT 'message' CHECK (kind IN ('message', 'evidence')),
+  body           TEXT NOT NULL,
+  attachment_url TEXT,
+  created_at     TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS ratings (
+  id             ${identity} PRIMARY KEY,
+  transaction_id TEXT NOT NULL REFERENCES transactions(id) ON DELETE CASCADE,
+  rater_id       TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  ratee_id       TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  stars          INTEGER NOT NULL CHECK (stars BETWEEN 1 AND 5),
+  comment        TEXT,
+  created_at     TEXT NOT NULL,
+  UNIQUE (transaction_id, rater_id)
+);
+
+CREATE TABLE IF NOT EXISTS fx_rates (
+  currency   TEXT PRIMARY KEY,
+  per_base   REAL NOT NULL,
+  updated_at TEXT NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS rate_limits (
@@ -147,6 +210,10 @@ CREATE INDEX IF NOT EXISTS idx_ledger_entries_reference ON ledger_entries(refere
 CREATE INDEX IF NOT EXISTS idx_outbox_status ON outbox(status, id);
 CREATE INDEX IF NOT EXISTS idx_notifications_user ON notifications(user_id, id);
 CREATE INDEX IF NOT EXISTS idx_otp_lookup ON otp_codes(phone, purpose, id);
+CREATE INDEX IF NOT EXISTS idx_payment_intents_user ON payment_intents(user_id, id);
+CREATE INDEX IF NOT EXISTS idx_scans_transaction ON shipment_scans(transaction_id, id);
+CREATE INDEX IF NOT EXISTS idx_messages_transaction ON transaction_messages(transaction_id, id);
+CREATE INDEX IF NOT EXISTS idx_ratings_ratee ON ratings(ratee_id, id);
 `;
 
 const MIGRATION_INDEX = (identity: string): string => `
@@ -230,9 +297,9 @@ const MIGRATIONS: Migration[] = [
         return;
       }
       const columns = new Set(
-        (await db.all<{ name: string }>("PRAGMA table_info(ledger_accounts)")).map(
-          (column) => column.name,
-        ),
+        (
+          await db.all<{ name: string }>("PRAGMA table_info(ledger_accounts)")
+        ).map((column) => column.name),
       );
       if (!columns.has("balance_snapshot_cents")) {
         await db.exec(
@@ -247,7 +314,145 @@ const MIGRATIONS: Migration[] = [
       );
     },
   },
+  {
+    id: "transactions-currency",
+    async run(db) {
+      await ensureColumn(db, "transactions", "currency", "TEXT NOT NULL DEFAULT 'KES'");
+      await ensureColumn(db, "transactions", "dispute_from_status", "TEXT");
+      await ensureColumn(db, "transactions", "resolution", "TEXT");
+    },
+  },
+  {
+    id: "ledger-account-currency",
+    async run(db) {
+      await ensureColumn(db, "ledger_accounts", "currency", "TEXT NOT NULL DEFAULT 'KES'");
+    },
+  },
+  {
+    id: "notifications-transaction-id",
+    async run(db) {
+      await ensureColumn(db, "notifications", "transaction_id", "TEXT");
+    },
+  },
+  {
+    id: "ledger-entry-types",
+    async run(db) {
+      await replaceEntryTypeCheck(db);
+    },
+  },
 ];
+
+async function ensureColumn(
+  db: Db,
+  table: string,
+  column: string,
+  definition: string,
+): Promise<void> {
+  if (db.dialect === "postgres") {
+    await db.exec(`ALTER TABLE ${table} ADD COLUMN IF NOT EXISTS ${column} ${definition}`);
+    return;
+  }
+
+  const columns = new Set(
+    (await db.all<{ name: string }>(`PRAGMA table_info(${table})`)).map((row) => row.name),
+  );
+
+  if (!columns.has(column)) {
+    await db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`);
+  }
+}
+
+/**
+ * SQLite cannot alter a CHECK constraint, so the table is rebuilt: it is
+ * renamed aside, recreated under its original name, the rows are copied across
+ * and the old copy is dropped. Only tables with no inbound foreign keys are
+ * rebuilt this way (renaming a parent rewrites every child's REFERENCES
+ * clause), and a guard refuses to drop a staging copy anything still
+ * references, so a schema surprise rolls the migration back instead of losing
+ * rows.
+ */
+async function rebuildSqliteTable(
+  db: Db,
+  table: string,
+  createSql: string,
+  copySql: string,
+  indexSql: string[] = [],
+): Promise<void> {
+  const staging = `${table}_migration_old`;
+
+  await db.exec(`ALTER TABLE ${table} RENAME TO ${staging}`);
+  await db.exec(createSql);
+  await db.exec(copySql);
+
+  const referencing = await db.get<{ count: number }>(
+    "SELECT COUNT(*) AS count FROM sqlite_master WHERE type = 'table' AND name <> ? AND sql LIKE ?",
+    [staging, `%${staging}%`],
+  );
+
+  if ((referencing?.count ?? 0) > 0) {
+    throw new Error(`Refusing to drop ${staging}: another table still references it`);
+  }
+
+  await db.exec(`DROP TABLE ${staging}`);
+
+  for (const sql of indexSql) {
+    await db.exec(sql);
+  }
+}
+
+async function dropCheckIfPresent(db: Db, table: string, definitionFragment: string): Promise<boolean> {
+  if (db.dialect === "postgres") {
+    const row = await db.get<{ conname: string }>(
+      `SELECT c.conname FROM pg_constraint c
+       WHERE c.conrelid = $1::regclass AND c.contype = 'c'
+         AND pg_get_constraintdef(c.oid) ILIKE $2`,
+      [table, `%${definitionFragment}%`],
+    );
+
+    if (!row) {
+      return false;
+    }
+
+    await db.exec(`ALTER TABLE ${table} DROP CONSTRAINT "${row.conname}"`);
+    return true;
+  }
+
+  return false;
+}
+
+async function replaceEntryTypeCheck(db: Db): Promise<void> {
+  const check = `CHECK (entry_type IN ('deposit', 'escrow_deposit', 'escrow_release', 'withdrawal', 'escrow_refund'))`;
+
+  if (db.dialect === "postgres") {
+    if (await dropCheckIfPresent(db, "ledger_entries", "entry_type IN")) {
+      await db.exec(
+        `ALTER TABLE ledger_entries ADD CONSTRAINT ledger_entries_entry_type_check ${check}`,
+      );
+    }
+    return;
+  }
+
+  await rebuildSqliteTable(
+    db,
+    "ledger_entries",
+    `CREATE TABLE ledger_entries (
+       id           INTEGER PRIMARY KEY,
+       account_id   TEXT NOT NULL REFERENCES ledger_accounts(id),
+       delta_cents  INTEGER NOT NULL,
+       entry_type   TEXT NOT NULL ${check},
+       reference_id TEXT,
+       note         TEXT,
+       created_at   TEXT NOT NULL
+     )`,
+    `INSERT INTO ledger_entries (id, account_id, delta_cents, entry_type, reference_id, note, created_at)
+     SELECT id, account_id, delta_cents, entry_type, reference_id, note, created_at
+     FROM ledger_entries_migration_old`,
+    [
+      "CREATE INDEX IF NOT EXISTS idx_ledger_entries_account ON ledger_entries(account_id, id)",
+      "CREATE INDEX IF NOT EXISTS idx_ledger_entries_reference ON ledger_entries(reference_id, id)",
+    ],
+  );
+}
 
 export async function runMigrations(db: Db): Promise<void> {
   if (db.dialect === "sqlite") {

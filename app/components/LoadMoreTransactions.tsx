@@ -17,10 +17,14 @@ interface LoadedPage {
 
 export function LoadMoreTransactions({
   initialCursor,
+  filter,
+  query,
   className,
   children,
 }: {
   initialCursor: string;
+  filter?: string;
+  query?: string;
   className?: string;
   children: (item: LoadedPage) => ReactNode;
 }) {
@@ -35,7 +39,14 @@ export function LoadMoreTransactions({
 
     setLoading(true);
     try {
-      const response = await fetch(`/api/transactions?cursor=${encodeURIComponent(cursor)}&limit=10`);
+      const params = new URLSearchParams({ cursor, limit: "10" });
+      if (filter) {
+        params.set("filter", filter);
+      }
+      if (query) {
+        params.set("q", query);
+      }
+      const response = await fetch(`/api/transactions?${params.toString()}`);
       const body = await response.json();
       const nextItems: TransactionView[] = body.transactions ?? [];
 

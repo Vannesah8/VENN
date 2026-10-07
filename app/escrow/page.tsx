@@ -28,14 +28,15 @@ const PAGE_SIZE = 10;
 export default async function EscrowIndexPage({
   searchParams,
 }: {
-  searchParams: Promise<{ filter?: string }>;
+  searchParams: Promise<{ filter?: string; q?: string }>;
 }) {
   const [actor, prefs] = await Promise.all([requireActor(), getPrefsFromCookies()]);
-  const { filter } = await searchParams;
-  const active = (FILTERS.find((entry) => entry.key === filter)?.key ?? "all") as FilterKey;
+  const params = await searchParams;
+  const active = (FILTERS.find((entry) => entry.key === params.filter)?.key ?? "all") as FilterKey;
+  const query = params.q?.trim() || undefined;
   const balance = await getWalletBalance(actor.id);
 
-  const page = await pageTransactionsForActor(actor, { limit: PAGE_SIZE });
+  const page = await pageTransactionsForActor(actor, { limit: PAGE_SIZE, filter: active, query });
   const transactions = page.transactions;
   const loadMoreCursor = page.nextCursor;
 
@@ -47,11 +48,39 @@ export default async function EscrowIndexPage({
       eyebrow="Trust layer"
       title="Escrow transactions"
     >
+      <form
+        role="search"
+        action="/escrow"
+        className="mb-4 flex flex-wrap items-center gap-2"
+      >
+        <input
+          type="search"
+          name="q"
+          defaultValue={query ?? ""}
+          placeholder="Search item, tracking, buyer or seller"
+          className="w-full max-w-sm rounded-full border border-[#dfece5] bg-white px-5 py-2 text-sm text-[#18352d] outline-none transition focus:border-[#1e4d3d]"
+        />
+        <button
+          type="submit"
+          className="rounded-full border border-[#1e4d3d] bg-[#1e4d3d] px-5 py-2 text-sm font-semibold text-white transition hover:bg-[#18352d]"
+        >
+          Search
+        </button>
+      </form>
+
       <div className="flex flex-wrap gap-2">
         {FILTERS.map((entry) => (
           <Link
             key={entry.key}
-            href={entry.key === "all" ? "/escrow" : `/escrow?filter=${entry.key}`}
+            href={`/escrow?${new URLSearchParams(
+              entry.key === "all"
+                ? query
+                  ? { q: query }
+                  : {}
+                : query
+                  ? { filter: entry.key, q: query }
+                  : { filter: entry.key },
+            ).toString()}`}
             className={`rounded-full border px-4 py-2 text-sm transition ${
               active === entry.key
                 ? "border-[#1e4d3d] bg-[#1e4d3d] text-white"
@@ -118,6 +147,8 @@ export default async function EscrowIndexPage({
           {loadMoreCursor ? (
             <LoadMoreTransactions
               initialCursor={loadMoreCursor}
+              filter={active}
+              query={query}
               className="contents"
             >
               {(item) => (

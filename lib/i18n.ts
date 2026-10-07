@@ -82,8 +82,12 @@ const en = {
     "Attach a tracking number to hand the order to the carrier.",
   "action.scan_in_transit.label": "Mark in transit",
   "action.scan_in_transit.description": "Log the first carrier scan on the parcel.",
+  "action.scan_milestone.label": "Log a scan",
+  "action.scan_milestone.description": "Record a parcel scan with an optional milestone and photo.",
   "action.confirm_delivery.label": "Confirm delivery",
   "action.confirm_delivery.description": "Record that the parcel reached the buyer.",
+  "action.confirm_receipt.label": "Confirm receipt",
+  "action.confirm_receipt.description": "Buyer acknowledges the parcel is in hand.",
   "action.release_funds.label": "Release funds",
   "action.release_funds.description":
     "Buyer confirms the item and escrow pays the seller.",
@@ -92,6 +96,13 @@ const en = {
     "Buyer reports a problem and escrow is held for review.",
   "action.resolve_dispute.label": "Resolve dispute",
   "action.resolve_dispute.description": "Mediator closes the case and returns the order to the buyer.",
+  "action.refund_buyer.label": "Refund the buyer",
+  "action.refund_buyer.description": "Close the case and return the escrow to the buyer.",
+
+  "milestone.picked_up": "Picked up",
+  "milestone.at_depot": "At depot",
+  "milestone.out_for_delivery": "Out for delivery",
+  "milestone.attempted_delivery": "Delivery attempted",
   "action.tracking_required": "Tracking number, carrier, origin and destination are required to dispatch",
 
   "ledger.label.deposit": "Wallet deposit",
@@ -156,6 +167,9 @@ const en = {
   "dashboard.demoCashRail": "Demo cash rail · top up to fund escrow",
   "dashboard.addFunds": "Add funds",
   "dashboard.adding": "Adding...",
+  "dashboard.withdraw": "Withdraw",
+  "dashboard.withdrawAmount": "Amount to withdraw",
+  "dashboard.withdrawToMpesa": "Mobile money number (optional)",
   "dashboard.needsAttention": "Needs your attention",
   "dashboard.noPendingActions": "No pending actions for {name}.",
   "dashboard.fundNewEscrow": "Fund a new escrow",
@@ -213,6 +227,7 @@ const en = {
   "notification.shipment.in_transit": "Package in transit",
   "notification.delivery.confirmed": "Delivery confirmed",
   "notification.escrow.released": "Payment released",
+  "notification.escrow.refunded": "Escrow refunded",
   "notification.dispute.opened": "Dispute opened",
   "notification.dispute.resolved": "Dispute resolved",
 
@@ -247,14 +262,25 @@ const sw: Partial<Record<MessageKey, string | ((p: StringParams) => string)>> = 
   "action.dispatch.description": "Weka namba ya kufuatilia ili kupeleka bidhaa kwa msafirishaji.",
   "action.scan_in_transit.label": "Weka kategoria ya usafiri",
   "action.scan_in_transit.description": "Rekodi uchunguzi wa kwanza wa sasisho la bidhaa.",
+  "action.scan_milestone.label": "Rekodi uchunguzi",
+  "action.scan_milestone.description": "Rekodi uchunguzi wa kifurushi pamoja na hatua na picha.",
   "action.confirm_delivery.label": "Thibitisha uwasilishaji",
   "action.confirm_delivery.description": "Rekodi kwamba kifurushi kimemfikia mnunuzi.",
+  "action.confirm_receipt.label": "Thibitisha kupokea",
+  "action.confirm_receipt.description": "Mnunuzi anathibitisha kifurushi kimefika mikononi mwake.",
   "action.release_funds.label": "Toa fedha",
   "action.release_funds.description": "Mnunuzi anathibitisha bidhaa na dhamana inamlipa muuzaji.",
   "action.open_dispute.label": "Fungua kesi",
   "action.open_dispute.description": "Mnunuzi anaripoti tatizo na dhamana inashikiliwa kwa mapitio.",
   "action.resolve_dispute.label": "Suluhisha kesi",
   "action.resolve_dispute.description": "Msimamizi anafunga kesi na kurudisha agizo kwa mnunuzi.",
+  "action.refund_buyer.label": "Mrejeshee mnunuzi fedha",
+  "action.refund_buyer.description": "Funga kesi na urudishe dhamana kwa mnunuzi.",
+
+  "milestone.picked_up": "Imechukuliwa",
+  "milestone.at_depot": "Kwenye bohari",
+  "milestone.out_for_delivery": "Njiani kuelekea kwa mpokeaji",
+  "milestone.attempted_delivery": "Uwasilishaji ulijaribiwa",
   "action.tracking_required": "Namba ya kufuatilia, msafirishaji, asili na lengwa vinahitajika",
 
   "ledger.label.deposit": "Amana ya pochi",
@@ -318,6 +344,9 @@ const sw: Partial<Record<MessageKey, string | ((p: StringParams) => string)>> = 
   "dashboard.demoCashRail": "Mfumo wa majaribio wa fedha · jaza pochi kufadhili dhamana",
   "dashboard.addFunds": "Ongeza fedha",
   "dashboard.adding": "Inaongeza...",
+  "dashboard.withdraw": "Toa",
+  "dashboard.withdrawAmount": "Kiasi cha kutoa",
+  "dashboard.withdrawToMpesa": "Namba ya simu ya mobile money (hiari)",
   "dashboard.needsAttention": "Inahitaji umakini wako",
   "dashboard.noPendingActions": "Hakuna vitendo vya {name} sasa.",
   "dashboard.fundNewEscrow": "Fadhili dhamana mpya",
@@ -375,6 +404,7 @@ const sw: Partial<Record<MessageKey, string | ((p: StringParams) => string)>> = 
   "notification.shipment.in_transit": "Kifurushi kinasafirishwa",
   "notification.delivery.confirmed": "Uwasilishaji umethibitishwa",
   "notification.escrow.released": "Malipo yametolewa",
+  "notification.escrow.refunded": "Dhamana imerejeshwa",
   "notification.dispute.opened": "Kesi imefunguliwa",
   "notification.dispute.resolved": "Kesi imesuluhishwa",
 
@@ -449,6 +479,13 @@ const NOTIFICATION_PATTERNS = {
       lang === "sw"
         ? `${p.amount} zimetolewa kutoka dhamana ya ${p.item}.`
         : `${p.amount} has been released from escrow for ${p.item}.`,
+  },
+  "notification.escrow.refunded": {
+    title: (lang: Lang, p: StringParams) => t(lang, "notification.escrow.refunded", p),
+    body: (lang: Lang, p: StringParams) =>
+      lang === "sw"
+        ? `${p.amount} zimerejeshwa kwa mnunuzi kutoka dhamana ya ${p.item}.`
+        : `${p.amount} has been refunded to the buyer from the escrow for ${p.item}.`,
   },
   "notification.dispute.opened": {
     title: (lang: Lang, p: StringParams) => t(lang, "notification.dispute.opened", p),

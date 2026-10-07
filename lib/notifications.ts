@@ -110,6 +110,7 @@ const TRANSITION_KEYS: Partial<Record<EscrowEvent["action"], NotificationKey>> =
   scan_in_transit: "notification.shipment.in_transit",
   confirm_delivery: "notification.delivery.confirmed",
   release_funds: "notification.escrow.released",
+  refund_buyer: "notification.escrow.refunded",
   open_dispute: "notification.dispute.opened",
   resolve_dispute: "notification.dispute.resolved",
 };
@@ -134,7 +135,7 @@ function paramsFor(
 
     const amountLabel = new Intl.NumberFormat("en-KE", {
       style: "currency",
-      currency: "KES",
+      currency: transaction.currency,
       maximumFractionDigits: 2,
     }).format(transaction.amountCents / 100);
 

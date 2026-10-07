@@ -1,9 +1,21 @@
 import { getDatabase, type Db, type DbLike } from "@/lib/db";
-import { assertAmountCents } from "@/lib/escrow";
+import { assertAmountCents, EscrowError } from "@/lib/escrow";
+import { convertCents } from "@/lib/fx";
+import { DEFAULT_CURRENCY, isCurrency, type Currency } from "@/lib/i18n";
 
 export type LedgerAccountKind = "wallet" | "escrow";
 
-export type LedgerEntryType = "deposit" | "escrow_deposit" | "escrow_release";
+export type LedgerEntryType =
+  | "deposit"
+  | "escrow_deposit"
+  | "escrow_release"
+  | "withdrawal"
+  | "escrow_refund";
+
+export interface LedgerBalance {
+  cents: number;
+  currency: Currency;
+}
 
 export interface LedgerEntryView {
   id: number;
@@ -39,20 +51,75 @@ export function escrowAccountId(transactionId: string): string {
   return `escrow_${transactionId}`;
 }
 
+/** Liquidity account that absorbs the difference when two legs settle in different currencies. */
+export function fxHouseAccountId(currency: Currency): string {
+  return walletAccountId(`fx_house_${currency}`);
+}
+
+export function asCurrency(value: unknown, fallback: Currency = DEFAULT_CURRENCY): Currency {
+  return isCurrency(value) ? value : fallback;
+}
+
 export async function ensureLedgerAccount(
   kind: LedgerAccountKind,
   ownerId: string,
   db: DbLike = getDatabase(),
+  currency: Currency = DEFAULT_CURRENCY,
 ): Promise<string> {
   const d = await db;
   const id = kind === "wallet" ? walletAccountId(ownerId) : escrowAccountId(ownerId);
 
   await d.run(
-    "INSERT INTO ledger_accounts (id, kind, owner_id, created_at) VALUES (?, ?, ?, ?) ON CONFLICT DO NOTHING",
-    [id, kind, ownerId, new Date().toISOString()],
+    "INSERT INTO ledger_accounts (id, kind, owner_id, currency, created_at) VALUES (?, ?, ?, ?, ?) ON CONFLICT DO NOTHING",
+    [id, kind, ownerId, currency, new Date().toISOString()],
   );
 
   return id;
+}
+
+/**
+ * Currency an account is denominated in: whatever the row already carries, so
+ * a wallet keeps its money's identity even when the owner flips the display
+ * currency in the session bar.
+ */
+export async function getAccountCurrency(
+  kind: LedgerAccountKind,
+  ownerId: string,
+  db: DbLike = getDatabase(),
+  fallback: Currency = DEFAULT_CURRENCY,
+): Promise<Currency> {
+  const d = await db;
+  const id = kind === "wallet" ? walletAccountId(ownerId) : escrowAccountId(ownerId);
+  const row = await d.get<{ currency: string }>(
+    "SELECT currency FROM ledger_accounts WHERE id = ?",
+    [id],
+  );
+
+  return row ? asCurrency(row.currency, fallback) : fallback;
+}
+
+/** A wallet adopts its owner's display currency the first time it is funded. */
+export async function resolveWalletCurrency(
+  userId: string,
+  db: DbLike = getDatabase(),
+): Promise<Currency> {
+  const d = await db;
+  const existing = await getAccountCurrency("wallet", userId, d, DEFAULT_CURRENCY);
+  const hasAccount = await d.get<{ id: string }>(
+    "SELECT id FROM ledger_accounts WHERE id = ?",
+    [walletAccountId(userId)],
+  );
+
+  if (hasAccount) {
+    return existing;
+  }
+
+  const user = await d.get<{ currency: string }>(
+    "SELECT currency FROM users WHERE id = ?",
+    [userId],
+  );
+
+  return user ? asCurrency(user.currency, DEFAULT_CURRENCY) : DEFAULT_CURRENCY;
 }
 
 export async function getLedgerBalance(
@@ -69,6 +136,19 @@ export async function getLedgerBalance(
   );
 
   return row?.balance ?? 0;
+}
+
+export async function getLedgerBalanceIn(
+  kind: LedgerAccountKind,
+  ownerId: string,
+  db: DbLike = getDatabase(),
+): Promise<LedgerBalance> {
+  const [cents, currency] = await Promise.all([
+    getLedgerBalance(kind, ownerId, db),
+    getAccountCurrency(kind, ownerId, db),
+  ]);
+
+  return { cents, currency };
 }
 
 async function insertEntry(
@@ -92,6 +172,17 @@ async function insertEntry(
   );
 }
 
+export interface MoveFundsOptions {
+  fromCurrency?: Currency;
+  toCurrency?: Currency;
+}
+
+/**
+ * Moves funds between two accounts. When the sides are denominated in
+ * different currencies the transfer is converted at the stored FX rate and
+ * two balancing legs are written against the FX house account, so the sum of
+ * every ledger entry still nets to zero across the system.
+ */
 export async function moveLedgerFunds(
   fromKind: LedgerAccountKind,
   fromOwnerId: string,
@@ -102,16 +193,59 @@ export async function moveLedgerFunds(
   referenceId: string,
   note: string,
   db: DbLike = getDatabase(),
+  options: MoveFundsOptions = {},
 ): Promise<void> {
   assertAmountCents(amountCents);
 
   const d = await db;
-  const fromId = await ensureLedgerAccount(fromKind, fromOwnerId, d);
-  const toId = await ensureLedgerAccount(toKind, toOwnerId, d);
+  const fromCurrency =
+    options.fromCurrency ??
+    (fromKind === "wallet"
+      ? await resolveWalletCurrency(fromOwnerId, d)
+      : await getAccountCurrency(fromKind, fromOwnerId, d));
+  const toCurrency =
+    options.toCurrency ??
+    (toKind === "wallet"
+      ? await resolveWalletCurrency(toOwnerId, d)
+      : await getAccountCurrency(toKind, toOwnerId, d));
+
+  const fromId = await ensureLedgerAccount(fromKind, fromOwnerId, d, fromCurrency);
+  const toId = await ensureLedgerAccount(toKind, toOwnerId, d, toCurrency);
   const now = new Date().toISOString();
 
   await insertEntry(fromId, -amountCents, entryType, referenceId, note, d, now);
-  await insertEntry(toId, amountCents, entryType, referenceId, note, d, now);
+
+  if (fromCurrency === toCurrency) {
+    await insertEntry(toId, amountCents, entryType, referenceId, note, d, now);
+    return;
+  }
+
+  const converted = await convertCents(amountCents, fromCurrency, toCurrency, d);
+  assertAmountCents(converted);
+
+  await insertEntry(toId, converted, entryType, referenceId, note, d, now);
+
+  const houseFrom = await ensureLedgerAccount("wallet", `fx_house_${fromCurrency}`, d, fromCurrency);
+  const houseTo = await ensureLedgerAccount("wallet", `fx_house_${toCurrency}`, d, toCurrency);
+
+  await insertEntry(
+    houseFrom,
+    amountCents,
+    entryType,
+    referenceId,
+    `FX cover ${fromCurrency} → ${toCurrency}`,
+    d,
+    now,
+  );
+  await insertEntry(
+    houseTo,
+    -converted,
+    entryType,
+    referenceId,
+    `FX cover ${fromCurrency} → ${toCurrency}`,
+    d,
+    now,
+  );
 }
 
 export async function depositToWallet(
@@ -119,14 +253,82 @@ export async function depositToWallet(
   amountCents: number,
   note: string,
   db: DbLike = getDatabase(),
+  currency?: Currency,
 ): Promise<void> {
   assertAmountCents(amountCents);
 
   const d = await db;
+  const walletCurrency = currency ?? (await resolveWalletCurrency(userId, d));
 
   await d.tx(async () => {
-    const accountId = await ensureLedgerAccount("wallet", userId, d);
+    const accountId = await ensureLedgerAccount("wallet", userId, d, walletCurrency);
     await insertEntry(accountId, amountCents, "deposit", null, note, d, new Date().toISOString());
+  });
+}
+
+/**
+ * Debits a wallet for a payout. The caller settles the external rail; this
+ * only takes the money out of the balance so it cannot be spent twice.
+ */
+export async function withdrawFromWallet(
+  userId: string,
+  amountCents: number,
+  note: string,
+  db: DbLike = getDatabase(),
+  referenceId: string | null = null,
+  currency?: Currency,
+): Promise<Currency> {
+  assertAmountCents(amountCents);
+
+  const d = await db;
+  const walletCurrency = currency ?? (await resolveWalletCurrency(userId, d));
+  const accountId = walletAccountId(userId);
+  const balance = await getLedgerBalance("wallet", userId, d);
+
+  if (balance < amountCents) {
+    throw new EscrowError("insufficient_funds", "The wallet does not hold enough for this payout");
+  }
+
+  await d.tx(async () => {
+    await ensureLedgerAccount("wallet", userId, d, walletCurrency);
+    await insertEntry(
+      accountId,
+      -amountCents,
+      "withdrawal",
+      referenceId,
+      note,
+      d,
+      new Date().toISOString(),
+    );
+  });
+
+  return walletCurrency;
+}
+
+/** Returns a failed payout to the wallet, auditable as its own entry. */
+export async function refundWithdrawal(
+  userId: string,
+  amountCents: number,
+  note: string,
+  db: DbLike = getDatabase(),
+  referenceId: string | null = null,
+): Promise<void> {
+  assertAmountCents(amountCents);
+
+  const d = await db;
+  const walletCurrency = await getAccountCurrency("wallet", userId, d);
+
+  await d.tx(async () => {
+    await ensureLedgerAccount("wallet", userId, d, walletCurrency);
+    await insertEntry(
+      walletAccountId(userId),
+      amountCents,
+      "deposit",
+      referenceId,
+      note,
+      d,
+      new Date().toISOString(),
+    );
   });
 }
 

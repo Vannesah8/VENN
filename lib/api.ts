@@ -5,7 +5,7 @@ import { getEscrowErrorStatus } from "@/lib/transactions";
 
 export function unauthorized(): NextResponse {
   return NextResponse.json(
-    { error: "Sign in to use this endpoint" },
+    { error: "Select an account first" },
     { status: 401 },
   );
 }

@@ -16,7 +16,12 @@ import { isLang, isCurrency } from "@/lib/i18n";
 import { parseAmountToCents } from "@/lib/money";
 import { processNotifications } from "@/lib/notifications";
 import { issueOtp, normalizePhone, verifyOtp } from "@/lib/otp";
+import {
+  createPaymentIntent,
+  settlePaymentIntent,
+} from "@/lib/payments";
 import { setPrefsCookie } from "@/lib/prefs";
+import { withdrawFromWallet } from "@/lib/ledger";
 import { consumeRateLimit, rateLimitError, type RateLimitResult } from "@/lib/rate-limit";
 import { createSession, destroySession, requireActor } from "@/lib/session";
 import {
@@ -191,7 +196,63 @@ export async function depositFunds(
 
   try {
     const amountCents = parseAmountToCents(String(formData.get("amount") ?? ""));
-    await depositWalletFunds(actor.id, amountCents, "Deposit from the demo cash rail");
+    const intent = await createPaymentIntent({
+      userId: actor.id,
+      kind: "deposit",
+      amountCents,
+    });
+    await depositWalletFunds(actor.id, amountCents, `Deposit via ${intent.reference}`);
+    await settlePaymentIntent(intent.id, {
+      status: "completed",
+      detail: "Demo cash rail settled instantly",
+    });
+
+    revalidatePath("/dashboard");
+
+    return IDLE_ACTION_STATE;
+  } catch (error) {
+    return toActionState(error);
+  }
+}
+
+export async function withdrawFunds(
+  _prev: ActionState,
+  formData: FormData,
+): Promise<ActionState> {
+  const actor = await requireActor();
+
+  try {
+    const amountCents = parseAmountToCents(String(formData.get("amount") ?? ""));
+    const phone = String(formData.get("phone") ?? "").trim() || null;
+    let intent;
+    try {
+      intent = await createPaymentIntent({
+        userId: actor.id,
+        kind: "withdrawal",
+        amountCents,
+        phone,
+      });
+
+      await withdrawFromWallet(
+        actor.id,
+        amountCents,
+        `Withdrawal via ${intent.reference}`,
+        undefined,
+        intent.id,
+      );
+      await settlePaymentIntent(intent.id, {
+        status: "completed",
+        detail: "Demo cash rail paid out",
+      });
+    } catch (error) {
+      if (intent) {
+        await settlePaymentIntent(intent.id, {
+          status: "failed",
+          detail: error instanceof Error ? error.message : "Payout failed",
+        });
+      }
+      throw error;
+    }
 
     revalidatePath("/dashboard");
 

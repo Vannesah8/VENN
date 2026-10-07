@@ -3,6 +3,7 @@ import Link from "next/link";
 import { FundWalletForm } from "@/app/components/FundWalletForm";
 import { OpenEscrowForm } from "@/app/components/OpenEscrowForm";
 import { StatusPill } from "@/app/components/StatusPill";
+import { WithdrawWalletForm } from "@/app/components/WithdrawWalletForm";
 import { WorkspaceShell } from "@/app/components/WorkspaceShell";
 import { describeActions } from "@/lib/escrow";
 import { formatCents, formatDate, roleLabel } from "@/lib/format";
@@ -116,6 +117,9 @@ export default async function DashboardPage() {
             </div>
             <div className="mt-4">
               <FundWalletForm prefs={prefs} />
+              <div className="mt-4 border-t border-[#edf3ee] pt-4">
+                <WithdrawWalletForm prefs={prefs} />
+              </div>
             </div>
           </section>
 

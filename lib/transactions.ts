@@ -6,14 +6,16 @@ import {
   type EscrowActor,
   type EscrowErrorCode,
   type EscrowEvent,
+  type EscrowResolution,
   type EscrowRole,
   type EscrowStatus,
   type EscrowTransaction,
+  type ScanInput,
   EscrowError,
   fundsHeld,
   resolveParty,
 } from "@/lib/escrow";
-import { getDatabase, type DbLike } from "@/lib/db";
+import { getDatabase, type Db, type DbLike } from "@/lib/db";
 import {
   depositToWallet,
   getLedgerBalance,
@@ -27,6 +29,7 @@ import { enqueueTransitionNotifications } from "@/lib/notifications";
 import {
   DEFAULT_CURRENCY,
   DEFAULT_LANG,
+  isCurrency,
   type Currency,
   type Lang,
 } from "@/lib/i18n";
@@ -55,12 +58,15 @@ interface TransactionRow {
   carrier_id: string | null;
   item_name: string;
   amount_cents: number;
+  currency: Currency;
   status: EscrowStatus;
   tracking_number: string | null;
   carrier_name: string | null;
   origin: string | null;
   destination: string | null;
   dispute_reason: string | null;
+  dispute_from_status: EscrowStatus | null;
+  resolution: EscrowResolution | null;
   created_at: string;
   updated_at: string;
   buyer_name?: string;
@@ -98,9 +104,9 @@ export interface TransactionPage {
 }
 
 const TRANSACTION_COLUMNS = `
-  t.id, t.buyer_id, t.seller_id, t.carrier_id, t.item_name, t.amount_cents, t.status,
+  t.id, t.buyer_id, t.seller_id, t.carrier_id, t.item_name, t.amount_cents, t.currency, t.status,
   t.tracking_number, t.carrier_name, t.origin, t.destination, t.dispute_reason,
-  t.created_at, t.updated_at
+  t.dispute_from_status, t.resolution, t.created_at, t.updated_at
 `;
 
 const TRANSACTION_VIEW_JOINS = `
@@ -108,6 +114,59 @@ const TRANSACTION_VIEW_JOINS = `
   LEFT JOIN users seller ON seller.id = t.seller_id
   LEFT JOIN users carrier_user ON carrier_user.id = t.carrier_id
 `;
+
+export const TRANSACTION_FILTERS = [
+  "all",
+  "held",
+  "delivered",
+  "disputed",
+  "released",
+] as const;
+export type TransactionFilter = (typeof TRANSACTION_FILTERS)[number];
+
+export function isTransactionFilter(value: unknown): value is TransactionFilter {
+  return (
+    typeof value === "string" && (TRANSACTION_FILTERS as readonly string[]).includes(value)
+  );
+}
+
+function filterClause(filter: TransactionFilter | undefined): { sql: string; params: unknown[] } {
+  switch (filter) {
+    case "held":
+      return { sql: "t.status <> 'released'", params: [] };
+    case "delivered":
+      return { sql: "t.status = 'delivered'", params: [] };
+    case "disputed":
+      return { sql: "t.status = 'disputed'", params: [] };
+    case "released":
+      return { sql: "t.status = 'released'", params: [] };
+    default:
+      return { sql: "", params: [] };
+  }
+}
+
+function escapeLike(value: string): string {
+  return value.replace(/[\\%_]/g, (match) => `\\${match}`);
+}
+
+function searchClause(dialect: Db["dialect"], query: string | undefined): { sql: string; params: unknown[] } {
+  const term = query?.trim();
+  if (!term) {
+    return { sql: "", params: [] };
+  }
+
+  const operator = dialect === "postgres" ? "ILIKE" : "LIKE";
+  const pattern = `%${escapeLike(term)}%`;
+
+  return {
+    sql: `(t.id ${operator} ? ESCAPE '\\'
+        OR t.item_name ${operator} ? ESCAPE '\\'
+        OR t.tracking_number ${operator} ? ESCAPE '\\'
+        OR buyer.display_name ${operator} ? ESCAPE '\\'
+        OR seller.display_name ${operator} ? ESCAPE '\\')`,
+    params: [pattern, pattern, pattern, pattern, pattern],
+  };
+}
 
 function toUser(row: UserRow): User {
   const isLang = (value: unknown): value is Lang =>
@@ -135,12 +194,15 @@ function toTransaction(row: TransactionRow): EscrowTransaction {
     carrierId: row.carrier_id,
     itemName: row.item_name,
     amountCents: row.amount_cents,
+    currency: isCurrency(row.currency) ? row.currency : DEFAULT_CURRENCY,
     status: row.status,
     trackingNumber: row.tracking_number,
     carrierName: row.carrier_name,
     origin: row.origin,
     destination: row.destination,
     disputeReason: row.dispute_reason,
+    disputeFromStatus: row.dispute_from_status,
+    resolution: row.resolution,
     createdAt: new Date(row.created_at),
     updatedAt: new Date(row.updated_at),
   };
@@ -321,20 +383,35 @@ export async function getTransactionViewById(
 export async function listTransactionsForActor(
   actor: EscrowActor,
   db: DbLike = getDatabase(),
+  options: { filter?: TransactionFilter; query?: string } = {},
 ): Promise<TransactionView[]> {
   const d = await db;
+  const filter = filterClause(options.filter);
+  const search = searchClause(d.dialect, options.query);
+
+  const where = [filter.sql, search.sql].filter(Boolean).join(" AND ");
+  const whereSql = where ? `AND ${where}` : "";
 
   if (actor.role === "mediator") {
-    return listAllTransactions(d);
+    const rows = await d.all<TransactionRow>(
+      `SELECT ${TRANSACTION_COLUMNS}, buyer.display_name AS buyer_name, seller.display_name AS seller_name, carrier_user.display_name AS carrier_user_name
+       FROM transactions t
+       ${TRANSACTION_VIEW_JOINS}
+       WHERE 1 = 1 ${whereSql}
+       ORDER BY t.updated_at DESC`,
+      [...filter.params, ...search.params],
+    );
+
+    return rows.map(toTransactionView);
   }
 
   const rows = await d.all<TransactionRow>(
     `SELECT ${TRANSACTION_COLUMNS}, buyer.display_name AS buyer_name, seller.display_name AS seller_name, carrier_user.display_name AS carrier_user_name
      FROM transactions t
      ${TRANSACTION_VIEW_JOINS}
-     WHERE t.buyer_id = ? OR t.seller_id = ? OR t.carrier_id = ?
+     WHERE (t.buyer_id = ? OR t.seller_id = ? OR t.carrier_id = ?) ${whereSql}
      ORDER BY t.updated_at DESC`,
-    [actor.id, actor.id, actor.id],
+    [actor.id, actor.id, actor.id, ...filter.params, ...search.params],
   );
 
   return rows.map(toTransactionView);
@@ -346,7 +423,12 @@ export async function listTransactionsForActor(
  */
 export async function pageTransactionsForActor(
   actor: EscrowActor,
-  options: { cursor?: string | null; limit?: number } = {},
+  options: {
+    cursor?: string | null;
+    limit?: number;
+    filter?: TransactionFilter;
+    query?: string;
+  } = {},
   db: DbLike = getDatabase(),
 ): Promise<TransactionPage> {
   const d = await db;
@@ -365,9 +447,17 @@ export async function pageTransactionsForActor(
   }
 
   const isMediator = actor.role === "mediator";
+  const filter = filterClause(options.filter);
+  const search = searchClause(d.dialect, options.query);
+
+  const scopeSql = isMediator ? "1 = 1" : "(t.buyer_id = ? OR t.seller_id = ? OR t.carrier_id = ?)";
+  const extraSql = [scopeSql, filter.sql, search.sql].filter(Boolean).join(" AND ");
+
   const params: unknown[] = isMediator
     ? []
     : [actor.id, actor.id, actor.id];
+
+  params.push(...filter.params, ...search.params);
 
   let cursorClause = "";
   if (cursorFrom) {
@@ -377,25 +467,15 @@ export async function pageTransactionsForActor(
 
   params.push(limit + 1);
 
-  const rows = isMediator
-    ? await d.all<TransactionRow>(
-        `SELECT ${TRANSACTION_COLUMNS}, buyer.display_name AS buyer_name, seller.display_name AS seller_name, carrier_user.display_name AS carrier_user_name
-         FROM transactions t
-         ${TRANSACTION_VIEW_JOINS}
-         WHERE 1 = 1 ${cursorClause}
-         ORDER BY t.updated_at DESC, t.id DESC
-         LIMIT ?`,
-        params,
-      )
-    : await d.all<TransactionRow>(
-        `SELECT ${TRANSACTION_COLUMNS}, buyer.display_name AS buyer_name, seller.display_name AS seller_name, carrier_user.display_name AS carrier_user_name
-         FROM transactions t
-         ${TRANSACTION_VIEW_JOINS}
-         WHERE (t.buyer_id = ? OR t.seller_id = ? OR t.carrier_id = ?) ${cursorClause}
-         ORDER BY t.updated_at DESC, t.id DESC
-         LIMIT ?`,
-        params,
-      );
+  const rows = await d.all<TransactionRow>(
+    `SELECT ${TRANSACTION_COLUMNS}, buyer.display_name AS buyer_name, seller.display_name AS seller_name, carrier_user.display_name AS carrier_user_name
+     FROM transactions t
+     ${TRANSACTION_VIEW_JOINS}
+     WHERE ${extraSql} ${cursorClause}
+     ORDER BY t.updated_at DESC, t.id DESC
+     LIMIT ?`,
+    params,
+  );
 
   const hasMore = rows.length > limit;
   const page = rows.slice(0, limit);
@@ -467,11 +547,13 @@ export async function createTransaction(
   await d.tx(async () => {
     await d.run(
       `INSERT INTO transactions (
-         id, buyer_id, seller_id, carrier_id, item_name, amount_cents, status,
-         tracking_number, carrier_name, origin, destination, dispute_reason, created_at, updated_at
+         id, buyer_id, seller_id, carrier_id, item_name, amount_cents, currency, status,
+         tracking_number, carrier_name, origin, destination, dispute_reason,
+         dispute_from_status, resolution, created_at, updated_at
        ) VALUES (
-         ?, ?, ?, NULL, ?, ?, ?,
-         NULL, NULL, NULL, NULL, NULL, ?, ?
+         ?, ?, ?, NULL, ?, ?, ?, ?,
+         NULL, NULL, NULL, NULL, NULL,
+         NULL, NULL, ?, ?
        )`,
       [
         transaction.id,
@@ -479,6 +561,7 @@ export async function createTransaction(
         transaction.sellerId,
         transaction.itemName,
         transaction.amountCents,
+        transaction.currency,
         transaction.status,
         now,
         now,
@@ -544,6 +627,8 @@ export async function applyActionToTransaction(
            origin = ?,
            destination = ?,
            dispute_reason = ?,
+           dispute_from_status = ?,
+           resolution = ?,
            updated_at = ?
        WHERE id = ?`,
       [
@@ -554,6 +639,8 @@ export async function applyActionToTransaction(
         updated.origin,
         updated.destination,
         updated.disputeReason,
+        updated.disputeFromStatus,
+        updated.resolution,
         now,
         updated.id,
       ],
@@ -578,7 +665,39 @@ export async function applyActionToTransaction(
       ],
     );
 
-    if (current.status === "delivered" && updated.status === "released") {
+    if (payload.action === "scan_in_transit" || payload.action === "scan_milestone") {
+      const scan = payload.input as ScanInput | undefined;
+      await d.run(
+        `INSERT INTO shipment_scans (
+           transaction_id, actor_id, actor_name, action, milestone, location, photo_url, note, created_at
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [
+          updated.id,
+          actor.id,
+          actor.displayName,
+          payload.action,
+          scan?.milestone ?? null,
+          scan?.location ?? null,
+          scan?.photoUrl ?? null,
+          scan?.note ?? null,
+          now,
+        ],
+      );
+    }
+
+    if (updated.resolution === "refunded" && updated.status === "released") {
+      await moveLedgerFunds(
+        "escrow",
+        id,
+        "wallet",
+        current.buyerId,
+        current.amountCents,
+        "escrow_refund",
+        id,
+        `${current.itemName} escrow refunded to buyer`,
+        d,
+      );
+    } else if (current.status === "delivered" && updated.status === "released") {
       await moveLedgerFunds(
         "escrow",
         id,

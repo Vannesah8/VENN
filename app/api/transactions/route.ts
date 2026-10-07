@@ -6,6 +6,7 @@ import { EscrowError } from "@/lib/escrow";
 import { getCurrentActor } from "@/lib/session";
 import {
   createTransaction,
+  isTransactionFilter,
   pageTransactionsForActor,
 } from "@/lib/transactions";
 
@@ -21,8 +22,11 @@ export async function GET(request: Request) {
   const cursor = url.searchParams.get("cursor") ?? null;
   const limitParam = Number(url.searchParams.get("limit") ?? "20");
   const limit = Number.isFinite(limitParam) && limitParam > 0 ? limitParam : 20;
+  const filterParam = url.searchParams.get("filter");
+  const filter = filterParam && isTransactionFilter(filterParam) ? filterParam : undefined;
+  const query = url.searchParams.get("q")?.trim() || undefined;
 
-  const page = await pageTransactionsForActor(actor!, { cursor, limit });
+  const page = await pageTransactionsForActor(actor!, { cursor, limit, filter, query });
 
   return NextResponse.json({
     actor: { id: actor!.id, role: actor!.role },

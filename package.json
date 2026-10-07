@@ -17,6 +17,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@vercel/connect": "^2.4.1",
     "better-sqlite3": "^13.0.3",
     "next": "16.3.8",
     "pg": "^8.23.1",

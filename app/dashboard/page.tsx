@@ -1,5 +1,6 @@
 import Link from "next/link";
 
+import { ConnectCard } from "@/app/components/ConnectCard";
 import { FundWalletForm } from "@/app/components/FundWalletForm";
 import { OpenEscrowForm } from "@/app/components/OpenEscrowForm";
 import { StatusPill } from "@/app/components/StatusPill";
@@ -105,6 +106,8 @@ export default async function DashboardPage() {
         </section>
 
         <div className="space-y-6">
+          <ConnectCard prefs={prefs} />
+
           <section className="rounded-3xl border border-[#dfece5] bg-white p-6 shadow-[0_16px_30px_rgba(24,53,45,0.05)]">
             <div className="flex items-end justify-between gap-3">
               <div>

@@ -177,6 +177,12 @@ const en = {
     "Funds move out of your wallet and stay held until you confirm delivery. Signed in as {role}.",
   "dashboard.nothingHere": "Nothing here yet. Fund an escrow below to get started.",
 
+  "connect.title": "External connections",
+  "connect.blurb": "Authorize VENN to act on your behalf on connected services.",
+  "connect.connectButton": "Connect account",
+  "connect.connected": "Connected",
+  "connect.error": "Could not start authorization. Try again.",
+
   "escrowIndex.eyebrow": "Trust layer",
   "escrowIndex.title": "Escrow transactions",
   "escrowIndex.all": "All",
@@ -353,6 +359,12 @@ const sw: Partial<Record<MessageKey, string | ((p: StringParams) => string)>> = 
   "dashboard.fundHelp":
     "Fedha zinatoka kwenye pochi yako na kubaki zikishikiliwa hadi uthibitishe uwasilishaji. Umeingia kama {role}.",
   "dashboard.nothingHere": "Bado hakuna dhamana. Fadhili moja hapa chini kuanza.",
+
+  "connect.title": "Muunganisho wa nje",
+  "connect.blurb": "Idhinisha VENN kufanya kazi kwa niaba yako kwenye huduma zilizounganishwa.",
+  "connect.connectButton": "Unganisha akaunti",
+  "connect.connected": "Umeunganisha",
+  "connect.error": "Imeshindikana kuanza idhini. Jaribu tena.",
 
   "escrowIndex.eyebrow": "Safu ya uaminifu",
   "escrowIndex.title": "Dhamana za biashara",

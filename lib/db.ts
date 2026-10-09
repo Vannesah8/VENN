@@ -28,11 +28,16 @@ const IDENTITY = {
   postgres: "BIGINT GENERATED ALWAYS AS IDENTITY",
 } as const;
 
+const EPOCH_MILLISECONDS = {
+  sqlite: "INTEGER",
+  postgres: "BIGINT",
+} as const;
+
 function identityFor(dialect: Dialect): string {
   return IDENTITY[dialect];
 }
 
-const SCHEMA_TEMPLATE = (identity: string): string => `
+const SCHEMA_TEMPLATE = (identity: string, epochMilliseconds: string): string => `
 CREATE TABLE IF NOT EXISTS users (
   id            TEXT PRIMARY KEY,
   display_name  TEXT NOT NULL,
@@ -195,7 +200,7 @@ CREATE TABLE IF NOT EXISTS fx_rates (
 
 CREATE TABLE IF NOT EXISTS rate_limits (
   key          TEXT NOT NULL,
-  window_start INTEGER NOT NULL,
+  window_start ${epochMilliseconds} NOT NULL,
   count        INTEGER NOT NULL DEFAULT 0,
   PRIMARY KEY (key, window_start)
 );
@@ -340,6 +345,14 @@ const MIGRATIONS: Migration[] = [
       await replaceEntryTypeCheck(db);
     },
   },
+  {
+    id: "rate-limits-window-start-bigint",
+    async run(db) {
+      if (db.dialect === "postgres") {
+        await db.exec("ALTER TABLE rate_limits ALTER COLUMN window_start TYPE BIGINT");
+      }
+    },
+  },
 ];
 
 async function ensureColumn(
@@ -461,7 +474,9 @@ export async function runMigrations(db: Db): Promise<void> {
   }
 
   await db.exec(MIGRATION_INDEX(identityFor(db.dialect)));
-  await db.exec(SCHEMA_TEMPLATE(identityFor(db.dialect)));
+  await db.exec(
+    SCHEMA_TEMPLATE(identityFor(db.dialect), EPOCH_MILLISECONDS[db.dialect]),
+  );
 
   const applied = new Set(
     (

@@ -2,9 +2,43 @@ import { Client } from "pg";
 
 import { runMigrations, type Db } from "@/lib/db";
 
-function mapPlaceholders(sql: string): string {
+/**
+ * Rewrites SQLite-style `?` placeholders into Postgres `$n` ones. A naive
+ * global replace would also rewrite any `?` that appears inside a string
+ * literal (for example a `LIKE` pattern or a JSON operator), shifting every
+ * later placeholder and mis-binding the parameters — so the scan tracks
+ * single-quoted literals and leaves their contents untouched.
+ */
+export function mapPlaceholders(sql: string): string {
   let index = 0;
-  return sql.replace(/\?/g, () => `$${++index}`);
+  let result = "";
+  let inString = false;
+
+  for (let i = 0; i < sql.length; i += 1) {
+    const char = sql[i];
+
+    if (char === "'") {
+      // A doubled quote is an escaped quote inside a string literal.
+      if (inString && sql[i + 1] === "'") {
+        result += "''";
+        i += 1;
+        continue;
+      }
+      inString = !inString;
+      result += char;
+      continue;
+    }
+
+    if (char === "?" && !inString) {
+      index += 1;
+      result += `$${index}`;
+      continue;
+    }
+
+    result += char;
+  }
+
+  return result;
 }
 
 class PostgresDatabase implements Db {

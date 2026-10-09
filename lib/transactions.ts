@@ -11,8 +11,10 @@ import {
   type EscrowStatus,
   type EscrowTransaction,
   type ScanInput,
+  type ScanMilestone,
   EscrowError,
   fundsHeld,
+  isScanMilestone,
   resolveParty,
 } from "@/lib/escrow";
 import { getDatabase, type Db, type DbLike } from "@/lib/db";
@@ -101,6 +103,34 @@ interface UserRow {
 export interface TransactionPage {
   transactions: TransactionView[];
   nextCursor: string | null;
+}
+
+export type ShipmentScanAction = "scan_in_transit" | "scan_milestone";
+
+export interface ShipmentScanView {
+  id: number;
+  transactionId: string;
+  actorId: string;
+  actorName: string;
+  action: ShipmentScanAction;
+  milestone: ScanMilestone | null;
+  location: string | null;
+  photoUrl: string | null;
+  note: string | null;
+  createdAt: Date;
+}
+
+interface ScanRow {
+  id: number;
+  transaction_id: string;
+  actor_id: string;
+  actor_name: string;
+  action: string;
+  milestone: string | null;
+  location: string | null;
+  photo_url: string | null;
+  note: string | null;
+  created_at: string;
 }
 
 const TRANSACTION_COLUMNS = `
@@ -513,6 +543,34 @@ export async function listEscrowEvents(
   return rows.map(toEvent);
 }
 
+function toShipmentScan(row: ScanRow): ShipmentScanView {
+  return {
+    id: row.id,
+    transactionId: row.transaction_id,
+    actorId: row.actor_id,
+    actorName: row.actor_name,
+    action: row.action === "scan_milestone" ? "scan_milestone" : "scan_in_transit",
+    milestone: isScanMilestone(row.milestone) ? row.milestone : null,
+    location: row.location,
+    photoUrl: row.photo_url,
+    note: row.note,
+    createdAt: new Date(row.created_at),
+  };
+}
+
+export async function listShipmentScans(
+  transactionId: string,
+  db: DbLike = getDatabase(),
+): Promise<ShipmentScanView[]> {
+  const d = await db;
+  const rows = await d.all<ScanRow>(
+    "SELECT id, transaction_id, actor_id, actor_name, action, milestone, location, photo_url, note, created_at FROM shipment_scans WHERE transaction_id = ? ORDER BY id ASC",
+    [transactionId],
+  );
+
+  return rows.map(toShipmentScan);
+}
+
 export async function createTransaction(
   input: CreateTransactionInput,
   actor: EscrowActor,
@@ -542,7 +600,8 @@ export async function createTransaction(
   }
 
   const transaction = createEscrowTransaction({ ...input, buyerId });
-  const now = new Date().toISOString();
+  const createdAt = transaction.createdAt.toISOString();
+  const updatedAt = transaction.updatedAt.toISOString();
 
   await d.tx(async () => {
     await d.run(
@@ -563,8 +622,8 @@ export async function createTransaction(
         transaction.amountCents,
         transaction.currency,
         transaction.status,
-        now,
-        now,
+        createdAt,
+        updatedAt,
       ],
     );
 
@@ -578,7 +637,7 @@ export async function createTransaction(
         actor.displayName,
         actor.role,
         transaction.status,
-        now,
+        createdAt,
       ],
     );
 

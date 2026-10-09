@@ -8,7 +8,7 @@
     "start": "next start",
     "lint": "eslint",
     "test": "tsx --test \"lib/**/*.test.ts\"",
-    "test:postgres": "VENN_DB_URL=postgres://venn:venn@localhost:5432/venn tsx --test \"lib/**/*.test.ts\"",
+    "test:postgres": "VENN_DB_URL=postgres://venn:venn@localhost:5432/venn tsx --test --test-concurrency=1 \"lib/**/*.test.ts\"",
     "db:up": "docker compose up -d postgres",
     "seed": "tsx scripts/seed.ts",
     "seed:reset": "tsx scripts/seed.ts --reset",

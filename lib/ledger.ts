@@ -151,6 +151,21 @@ export async function getLedgerBalanceIn(
   return { cents, currency };
 }
 
+const FX_HOUSE_PREFIX = "wallet_fx_house_";
+
+/** The FX house accounts are the system's balancing sink and may run negative. */
+function isSystemAccount(accountId: string): boolean {
+  return accountId.startsWith(FX_HOUSE_PREFIX);
+}
+
+/**
+ * Appends one leg and maintains the account's snapshot. A debit (negative
+ * delta) on a real wallet or escrow account is applied with a conditional
+ * update that requires the balance to cover it, so two concurrent debits can
+ * never drive an account negative: the loser of the race matches zero rows and
+ * the whole transaction is rejected. The check lives in the same statement as
+ * the decrement, which makes it atomic under both SQLite and Postgres.
+ */
 async function insertEntry(
   accountId: string,
   deltaCents: number,
@@ -160,15 +175,32 @@ async function insertEntry(
   db: Db,
   now: string,
 ): Promise<void> {
+  if (deltaCents < 0 && !isSystemAccount(accountId)) {
+    const required = -deltaCents;
+    const { changes } = await db.run(
+      `UPDATE ledger_accounts
+       SET balance_snapshot_cents = balance_snapshot_cents - ?
+       WHERE id = ? AND balance_snapshot_cents >= ?`,
+      [required, accountId, required],
+    );
+
+    if (changes === 0) {
+      throw new EscrowError(
+        "insufficient_funds",
+        "The account does not hold enough for this debit",
+      );
+    }
+  } else {
+    await db.run(
+      "UPDATE ledger_accounts SET balance_snapshot_cents = balance_snapshot_cents + ? WHERE id = ?",
+      [deltaCents, accountId],
+    );
+  }
+
   await db.run(
     `INSERT INTO ledger_entries (account_id, delta_cents, entry_type, reference_id, note, created_at)
      VALUES (?, ?, ?, ?, ?, ?)`,
     [accountId, deltaCents, entryType, referenceId, note, now],
-  );
-
-  await db.run(
-    "UPDATE ledger_accounts SET balance_snapshot_cents = balance_snapshot_cents + ? WHERE id = ?",
-    [deltaCents, accountId],
   );
 }
 

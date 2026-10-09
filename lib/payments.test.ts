@@ -2,7 +2,8 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import { hashPassword } from "./auth";
-import { openDatabase, setDatabase, type Db } from "./db";
+import { setDatabase, type Db } from "./db";
+import { openTestDatabase } from "./db/test-support";
 import { EscrowError } from "./escrow";
 import { getLedgerBalance, withdrawFromWallet } from "./ledger";
 import {
@@ -31,7 +32,7 @@ async function seedBuyer(): Promise<{ id: string }> {
 }
 
 test("a deposit intent settles completed and credits the wallet", async (t) => {
-  db = await openDatabase(":memory:");
+  db = await openTestDatabase();
   setDatabase(db);
   t.after(async () => db.close());
 
@@ -55,7 +56,7 @@ test("a deposit intent settles completed and credits the wallet", async (t) => {
 });
 
 test("a withdrawal debits the wallet against the intent", async (t) => {
-  db = await openDatabase(":memory:");
+  db = await openTestDatabase();
   setDatabase(db);
   t.after(async () => db.close());
 
@@ -74,7 +75,7 @@ test("a withdrawal debits the wallet against the intent", async (t) => {
 });
 
 test("a payout over the balance fails the intent and leaves the wallet whole", async (t) => {
-  db = await openDatabase(":memory:");
+  db = await openTestDatabase();
   setDatabase(db);
   t.after(async () => db.close());
 
@@ -96,7 +97,7 @@ test("a payout over the balance fails the intent and leaves the wallet whole", a
 });
 
 test("an intent cannot settle twice", async (t) => {
-  db = await openDatabase(":memory:");
+  db = await openTestDatabase();
   setDatabase(db);
   t.after(async () => db.close());
 

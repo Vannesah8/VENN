@@ -1,13 +1,14 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { openDatabase, setDatabase, type Db } from "./db";
+import { setDatabase, type Db } from "./db";
+import { openTestDatabase } from "./db/test-support";
 import { consumeRateLimit, pruneRateLimits, rateLimitError } from "./rate-limit";
 
 let db: Db;
 
 async function freshDatabase(): Promise<void> {
-  db = await openDatabase(":memory:");
+  db = await openTestDatabase();
   setDatabase(db);
 }
 

@@ -1,13 +1,14 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { openDatabase, setDatabase, type Db } from "./db";
+import { setDatabase, type Db } from "./db";
+import { openTestDatabase } from "./db/test-support";
 import { DEFAULT_RATES, convertCents, getRate, setRate } from "./fx";
 
 let db: Db;
 
 test("the pivot rate is constant and the corridor defaults are sane", async (t) => {
-  db = await openDatabase(":memory:");
+  db = await openTestDatabase();
   setDatabase(db);
   t.after(async () => db.close());
 
@@ -17,7 +18,7 @@ test("the pivot rate is constant and the corridor defaults are sane", async (t) 
 });
 
 test("getRate falls back to the seeded defaults without persisting", async (t) => {
-  db = await openDatabase(":memory:");
+  db = await openTestDatabase();
   setDatabase(db);
   t.after(async () => db.close());
 
@@ -32,7 +33,7 @@ test("getRate falls back to the seeded defaults without persisting", async (t) =
 });
 
 test("setRate overrides the persisted rate for later conversions", async (t) => {
-  db = await openDatabase(":memory:");
+  db = await openTestDatabase();
   setDatabase(db);
   t.after(async () => db.close());
 
@@ -41,7 +42,7 @@ test("setRate overrides the persisted rate for later conversions", async (t) => 
 });
 
 test("convertCents rounds once and moves through the KES pivot", async (t) => {
-  db = await openDatabase(":memory:");
+  db = await openTestDatabase();
   setDatabase(db);
   t.after(async () => db.close());
 
@@ -54,7 +55,7 @@ test("convertCents rounds once and moves through the KES pivot", async (t) => {
 });
 
 test("convertCents refuses non-finite amounts", async (t) => {
-  db = await openDatabase(":memory:");
+  db = await openTestDatabase();
   setDatabase(db);
   t.after(async () => db.close());
 

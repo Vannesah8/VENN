@@ -1,10 +1,12 @@
 "use server";
 
+import { headers } from "next/headers";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 
 import { IDLE_ACTION_STATE, type ActionState } from "@/lib/action-state";
 import { hashPassword, verifyPassword } from "@/lib/auth";
+import { getDatabase } from "@/lib/db";
 import {
   type EscrowAction,
   type EscrowActionPayload,
@@ -49,16 +51,54 @@ function toActionState(error: unknown): ActionState {
   };
 }
 
+const AUTH_WINDOW_MS = 15 * 60 * 1000;
+
+/** Best-effort client IP from the proxy headers Vercel and most platforms set. */
+async function clientIp(): Promise<string> {
+  const headerList = await headers();
+  const forwarded = headerList.get("x-forwarded-for");
+  const candidate =
+    forwarded?.split(",")[0]?.trim() || headerList.get("x-real-ip") || "unknown";
+  return candidate.slice(0, 64);
+}
+
+/**
+ * Applies several rate-limit buckets, returning the first denial. Each auth
+ * surface is limited both per identity (so a single account cannot be brute
+ * forced) and per client IP (so one host cannot spray credentials across many
+ * accounts).
+ */
+async function enforceRateLimits(
+  buckets: Array<{ key: string; limit: number }>,
+): Promise<ActionState | null> {
+  for (const bucket of buckets) {
+    const result = await consumeRateLimit(bucket.key, {
+      limit: bucket.limit,
+      windowMs: AUTH_WINDOW_MS,
+    });
+
+    if (!result.allowed) {
+      return await deniedState(result);
+    }
+  }
+
+  return null;
+}
+
 export async function loginUser(
   _prev: ActionState,
   formData: FormData,
 ): Promise<ActionState> {
   const email = String(formData.get("email") ?? "").trim().toLowerCase();
   const password = String(formData.get("password") ?? "");
+  const ip = await clientIp();
 
-  const limit = await consumeRateLimit(email, { limit: 10, windowMs: 15 * 60 * 1000 });
-  if (!limit.allowed) {
-    return (await deniedState(limit))!;
+  const denied = await enforceRateLimits([
+    { key: `login:${email}`, limit: 10 },
+    { key: `login-ip:${ip}`, limit: 40 },
+  ]);
+  if (denied) {
+    return denied;
   }
 
   const user = await getUserByEmail(email);
@@ -77,10 +117,14 @@ export async function sendOtpLogin(
   formData: FormData,
 ): Promise<ActionState & { demoCode?: string }> {
   const phone = normalizePhone(String(formData.get("phone") ?? ""));
+  const ip = await clientIp();
 
-  const limit = await consumeRateLimit(phone, { limit: 5, windowMs: 15 * 60 * 1000 });
-  if (!limit.allowed) {
-    return (await deniedState(limit))!;
+  const denied = await enforceRateLimits([
+    { key: `otp:${phone}`, limit: 5 },
+    { key: `otp-ip:${ip}`, limit: 20 },
+  ]);
+  if (denied) {
+    return denied;
   }
 
   try {
@@ -105,6 +149,15 @@ export async function otpLogin(
 ): Promise<ActionState> {
   const phone = normalizePhone(String(formData.get("phone") ?? ""));
   const code = String(formData.get("code") ?? "");
+  const ip = await clientIp();
+
+  const denied = await enforceRateLimits([
+    { key: `otp-verify:${phone}`, limit: 10 },
+    { key: `otp-verify-ip:${ip}`, limit: 40 },
+  ]);
+  if (denied) {
+    return denied;
+  }
 
   const ok = await verifyOtp(phone, code, "login");
 
@@ -143,6 +196,12 @@ export async function registerUser(
   const role = String(formData.get("role") ?? "buyer");
   const rawPhone = String(formData.get("phone") ?? "").trim();
   const phone = rawPhone ? normalizePhone(rawPhone) : null;
+
+  const ip = await clientIp();
+  const denied = await enforceRateLimits([{ key: `register-ip:${ip}`, limit: 20 }]);
+  if (denied) {
+    return denied;
+  }
 
   if (displayName.length < 2) {
     return { error: "Your name must be at least 2 characters", status: "invalid_input" };
@@ -196,15 +255,28 @@ export async function depositFunds(
 
   try {
     const amountCents = parseAmountToCents(String(formData.get("amount") ?? ""));
-    const intent = await createPaymentIntent({
-      userId: actor.id,
-      kind: "deposit",
-      amountCents,
-    });
-    await depositWalletFunds(actor.id, amountCents, `Deposit via ${intent.reference}`);
-    await settlePaymentIntent(intent.id, {
-      status: "completed",
-      detail: "Demo cash rail settled instantly",
+    const db = await getDatabase();
+
+    // The intent, the wallet credit and the settlement commit together, so a
+    // failure can never leave a pending intent with money already credited.
+    await db.tx(async () => {
+      const intent = await createPaymentIntent(
+        {
+          userId: actor.id,
+          kind: "deposit",
+          amountCents,
+        },
+        db,
+      );
+      await depositWalletFunds(actor.id, amountCents, `Deposit via ${intent.reference}`, db);
+      await settlePaymentIntent(
+        intent.id,
+        {
+          status: "completed",
+          detail: "Demo cash rail settled instantly",
+        },
+        db,
+      );
     });
 
     revalidatePath("/dashboard");
@@ -224,33 +296,46 @@ export async function withdrawFunds(
   try {
     const amountCents = parseAmountToCents(String(formData.get("amount") ?? ""));
     const phone = String(formData.get("phone") ?? "").trim() || null;
-    let intent;
-    try {
-      intent = await createPaymentIntent({
+    const db = await getDatabase();
+    // The intent is persisted first so a rejected payout leaves an auditable
+    // "failed" record; the debit and its settlement then commit together.
+    const intent = await createPaymentIntent(
+      {
         userId: actor.id,
         kind: "withdrawal",
         amountCents,
         phone,
-      });
+      },
+      db,
+    );
 
-      await withdrawFromWallet(
-        actor.id,
-        amountCents,
-        `Withdrawal via ${intent.reference}`,
-        undefined,
-        intent.id,
-      );
-      await settlePaymentIntent(intent.id, {
-        status: "completed",
-        detail: "Demo cash rail paid out",
+    try {
+      await db.tx(async () => {
+        await withdrawFromWallet(
+          actor.id,
+          amountCents,
+          `Withdrawal via ${intent.reference}`,
+          db,
+          intent.id,
+        );
+        await settlePaymentIntent(
+          intent.id,
+          {
+            status: "completed",
+            detail: "Demo cash rail paid out",
+          },
+          db,
+        );
       });
     } catch (error) {
-      if (intent) {
-        await settlePaymentIntent(intent.id, {
+      await settlePaymentIntent(
+        intent.id,
+        {
           status: "failed",
           detail: error instanceof Error ? error.message : "Payout failed",
-        });
-      }
+        },
+        db,
+      );
       throw error;
     }
 

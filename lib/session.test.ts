@@ -2,7 +2,8 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import { hashPassword } from "./auth";
-import { openDatabase, setDatabase, type Db } from "./db";
+import { setDatabase, type Db } from "./db";
+import { openTestDatabase } from "./db/test-support";
 import type { EscrowActor } from "./escrow";
 import {
   createSessionRecord,
@@ -16,7 +17,7 @@ const BUYER: EscrowActor = { id: "buyer_1", displayName: "Aisha Mwangi", role: "
 let db: Db;
 
 async function freshDatabase(): Promise<void> {
-  db = await openDatabase(":memory:");
+  db = await openTestDatabase();
   setDatabase(db);
 
   await createUser(

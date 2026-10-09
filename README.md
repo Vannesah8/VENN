@@ -44,12 +44,16 @@ VENN_DB_URL=postgres://venn:venn@localhost:5432/venn npm run seed -- --reset
 VENN_DB_URL=postgres://venn:venn@localhost:5432/venn npm run dev
 ```
 
-Reads and writes are identical either way; the tests run against both:
+Reads and writes are identical either way; the same suite runs against both. Postgres tests share
+one database and are therefore serialized:
 
 ```bash
-npm test             # SQLite (in-memory)
-npm run test:postgres
+npm test             # SQLite (in-memory), files run in parallel
+npm run test:postgres # Postgres, --test-concurrency=1
 ```
+
+CI (`.github/workflows/ci.yml`) spins up a Postgres service and runs lint, typecheck, and both
+suites, so the Postgres driver is exercised on every push.
 
 ## Scripts
 
@@ -96,7 +100,9 @@ Rules the machine enforces:
 - Only the **seller** dispatches, and a dispatch requires tracking number, carrier, origin and
   destination.
 - Only the **assigned** carrier can scan; the carrier must not be the buyer or the seller.
-- Only **support** (mediator) can close a dispute, returning the order to `delivered`.
+- Only **support** (mediator) can close a dispute: `resolve_dispute` returns the order to the status
+  it held when the dispute opened (a parcel disputed in transit goes back to `in_transit`), and
+  `refund_buyer` settles the escrow back to the buyer.
 - `released` is terminal.
 - Read access is scoped too: buyers, sellers, the assigned carrier and support can view a
   transaction; everyone else gets `404`.

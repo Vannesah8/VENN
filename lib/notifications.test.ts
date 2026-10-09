@@ -2,7 +2,8 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import { hashPassword } from "./auth";
-import { openDatabase, setDatabase, type Db } from "./db";
+import { setDatabase, type Db } from "./db";
+import { openTestDatabase } from "./db/test-support";
 import type { EscrowTransaction } from "./escrow";
 import {
   enqueueTransitionNotifications,
@@ -36,7 +37,7 @@ function fundedTransaction(buyerId: string, sellerId: string): EscrowTransaction
 }
 
 async function freshDatabase(): Promise<void> {
-  db = await openDatabase(":memory:");
+  db = await openTestDatabase();
   setDatabase(db);
 
   await createUser({

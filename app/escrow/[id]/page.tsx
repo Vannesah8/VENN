@@ -6,6 +6,7 @@ import { StatusPill } from "@/app/components/StatusPill";
 import { WorkspaceShell } from "@/app/components/WorkspaceShell";
 import { canViewTransaction, describeActions, resolveParty } from "@/lib/escrow";
 import { formatCents, formatDate, formatSignedCents, partySentence, roleLabel } from "@/lib/format";
+import { t, type MessageKey } from "@/lib/i18n";
 import { getPrefsFromCookies } from "@/lib/prefs";
 import { requireActor } from "@/lib/session";
 import {
@@ -13,6 +14,7 @@ import {
   getTransactionViewById,
   getWalletBalance,
   listEscrowEvents,
+  listShipmentScans,
   listUsers,
 } from "@/lib/transactions";
 
@@ -43,9 +45,10 @@ export default async function EscrowDetailPage({
     notFound();
   }
 
-  const [events, ledger] = await Promise.all([
+  const [events, ledger, scans] = await Promise.all([
     listEscrowEvents(transaction.id),
     getEscrowLedgerEntries(transaction.id),
+    listShipmentScans(transaction.id),
   ]);
   const actions = describeActions(transaction, actor, prefs.lang);
   const party = resolveParty(transaction, actor);
@@ -213,6 +216,53 @@ export default async function EscrowDetailPage({
               <p className="mt-3 text-sm text-[#5d736a]">
                 Awaiting shipment details from the seller.
               </p>
+            )}
+          </section>
+
+          <section className="rounded-3xl border border-[#dfece5] bg-white p-6 shadow-[0_16px_30px_rgba(24,53,45,0.05)]">
+            <div className="flex items-center justify-between">
+              <h2 className="text-xl font-semibold text-[#18352d]">Scans</h2>
+              <p className="text-xs uppercase tracking-[0.16em] text-[#8b9d95]">
+                {scans.length} logged
+              </p>
+            </div>
+
+            {scans.length === 0 ? (
+              <p className="mt-4 rounded-2xl border border-[#edf3ee] bg-[#f8faf8] p-4 text-sm text-[#5d736a]">
+                No carrier scans yet. They appear here as the parcel moves.
+              </p>
+            ) : (
+              <ol className="mt-5 space-y-4">
+                {scans.map((scan) => (
+                  <li key={scan.id} className="flex gap-3">
+                    <span className="mt-1.5 h-2 w-2 shrink-0 rounded-full bg-[#1e4d3d]" />
+                    <div className="min-w-0 flex-1">
+                      <div className="flex flex-wrap items-baseline justify-between gap-2">
+                        <p className="text-sm font-medium text-[#18352d]">
+                          {scan.milestone
+                            ? t(prefs.lang, `milestone.${scan.milestone}` as MessageKey)
+                            : t(
+                                prefs.lang,
+                                scan.action === "scan_in_transit"
+                                  ? "action.scan_in_transit.label"
+                                  : "action.scan_milestone.label",
+                              )}
+                        </p>
+                        <span className="text-xs text-[#8b9d95]">
+                          {formatDate(scan.createdAt, prefs)}
+                        </span>
+                      </div>
+                      {scan.location ? (
+                        <p className="mt-1 text-sm text-[#5d736a]">{scan.location}</p>
+                      ) : null}
+                      {scan.note ? (
+                        <p className="mt-1 text-sm text-[#18352d]">“{scan.note}”</p>
+                      ) : null}
+                      <p className="mt-1 text-xs text-[#8b9d95]">{scan.actorName}</p>
+                    </div>
+                  </li>
+                ))}
+              </ol>
             )}
           </section>
 

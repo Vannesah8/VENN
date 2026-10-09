@@ -2,7 +2,8 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import { hashPassword } from "./auth";
-import { openDatabase, setDatabase, type Db } from "./db";
+import { setDatabase, type Db } from "./db";
+import { openTestDatabase } from "./db/test-support";
 import type { EscrowActor, EscrowStatus, EscrowTransaction } from "./escrow";
 import { EscrowError } from "./escrow";
 import {
@@ -18,6 +19,7 @@ import {
   getTransactionViewById,
   getWalletBalance,
   listEscrowEvents,
+  listShipmentScans,
   listTransactionsForActor,
   listUsers,
   getUserByEmail,
@@ -62,7 +64,7 @@ async function fundWallet(actor: EscrowActor, amountCents = START_BALANCE): Prom
 }
 
 async function freshDatabase(): Promise<void> {
-  db = await openDatabase(":memory:");
+  db = await openTestDatabase();
   setDatabase(db);
 
   for (const actor of [BUYER, OTHER_BUYER, SELLER, CARRIER, MEDIATOR]) {
@@ -283,6 +285,20 @@ test("scan actions persist shipment scans with their details", async (t) => {
   assert.equal(rows[1].milestone, "at_depot");
   assert.equal(rows[1].location, "Nairobi Depot");
   assert.equal(rows[1].actor_name, CARRIER.displayName);
+
+  const scans = await listShipmentScans(id, db);
+  assert.equal(scans.length, 2);
+  assert.deepEqual(
+    scans.map((scan) => scan.action),
+    ["scan_in_transit", "scan_milestone"],
+  );
+  assert.equal(scans[0].milestone, null);
+  assert.equal(scans[1].milestone, "at_depot");
+  assert.equal(scans[1].location, "Nairobi Depot");
+  assert.equal(scans[1].actorName, CARRIER.displayName);
+  assert.equal(scans[1].transactionId, id);
+  assert.equal(scans[1].createdAt instanceof Date, true);
+  assert.deepEqual(await listShipmentScans("missing", db), []);
 });
 
 test("the full lifecycle appends an audit trail", async (t) => {

@@ -1,7 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { openDatabase, setDatabase, type Db } from "./db";
+import { setDatabase, type Db } from "./db";
+import { openTestDatabase } from "./db/test-support";
 import { EscrowError } from "./escrow";
 import {
   depositToWallet,
@@ -15,7 +16,7 @@ import {
 let db: Db;
 
 async function freshDatabase(): Promise<void> {
-  db = await openDatabase(":memory:");
+  db = await openTestDatabase();
   setDatabase(db);
 }
 
@@ -56,14 +57,48 @@ test("moveLedgerFunds writes a balanced double entry", async (t) => {
   assert.equal(entries[1].deltaCents, 40_000);
 });
 
-test("a negative account balance is possible", async (t) => {
+test("a wallet cannot spend more than it holds", async (t) => {
   await freshDatabase();
   t.after(async () => db.close());
 
   await ensureLedgerAccount("wallet", "user_2", db);
-  await moveLedgerFunds("wallet", "user_2", "escrow", "txn_2", 10_000, "escrow_deposit", "txn_2", "No funds", db);
 
-  assert.equal(await getLedgerBalance("wallet", "user_2", db), -10_000);
+  await assert.rejects(
+    () =>
+      moveLedgerFunds(
+        "wallet",
+        "user_2",
+        "escrow",
+        "txn_2",
+        10_000,
+        "escrow_deposit",
+        "txn_2",
+        "No funds",
+        db,
+      ),
+    (error: unknown) =>
+      error instanceof EscrowError && error.code === "insufficient_funds",
+  );
+
+  assert.equal(await getLedgerBalance("wallet", "user_2", db), 0);
+  assert.equal(await getLedgerBalance("escrow", "txn_2", db), 0);
+});
+
+test("an escrow account cannot pay out more than it holds", async (t) => {
+  await freshDatabase();
+  t.after(async () => db.close());
+
+  await depositToWallet("user_1", 10_000, "Top-up", db);
+  await moveLedgerFunds("wallet", "user_1", "escrow", "txn_3", 5_000, "escrow_deposit", "txn_3", "In escrow", db);
+
+  await assert.rejects(
+    () =>
+      moveLedgerFunds("escrow", "txn_3", "wallet", "user_1", 9_000, "escrow_release", "txn_3", "Overpay", db),
+    (error: unknown) =>
+      error instanceof EscrowError && error.code === "insufficient_funds",
+  );
+
+  assert.equal(await getLedgerBalance("escrow", "txn_3", db), 5_000);
 });
 
 test("deposit rejects invalid amounts", async (t) => {

@@ -20,7 +20,8 @@ export async function consumeRateLimit(
   await d.run(
     `INSERT INTO rate_limits (key, window_start, count)
      VALUES (?, ?, 1)
-     ON CONFLICT (key, window_start) DO UPDATE SET count = count + 1`,
+     ON CONFLICT (key, window_start) DO UPDATE
+     SET count = rate_limits.count + 1`,
     [key, windowStart],
   );
 

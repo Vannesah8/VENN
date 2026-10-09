@@ -215,7 +215,7 @@ const en = {
 
   "register.eyebrow": "New identity",
   "register.title": "Create an account",
-  "register.subtitle": "Buyers fund escrow; sellers dispatch and get paid on release.",
+  "register.subtitle": "Buyers fund escrow; sellers ship; carriers deliver and log every scan.",
   "register.name": "Name",
   "register.role": "Role",
   "register.password": "Password",
@@ -236,6 +236,7 @@ const en = {
   "register.check.number": "A number or symbol",
   "register.roleBuyerHint": "Fund escrow, confirm delivery, release payment.",
   "register.roleSellerHint": "Dispatch orders and get paid on release.",
+  "register.roleCarrierHint": "Take delivery jobs and log scans on the route.",
   "register.panel.kicker": "Venn · trust layer",
   "register.panel.title": "Trade with a stranger without trusting one.",
   "register.panel.point1.title": "Funds wait in escrow",
@@ -420,7 +421,7 @@ const sw: Partial<Record<MessageKey, string | ((p: StringParams) => string)>> = 
 
   "register.eyebrow": "Utambulisho mpya",
   "register.title": "Unda akaunti",
-  "register.subtitle": "Wanunuzi wanaweka dhamana; wauzaji husafirisha na kulipwa baada ya kutolewa.",
+  "register.subtitle": "Wanunuzi huweka dhamana; wauzaji husafirisha; wasafirishaji huwasilisha na kurekodi uchunguzi.",
   "register.name": "Jina",
   "register.role": "Jukumu",
   "register.password": "Nywila",
@@ -441,6 +442,7 @@ const sw: Partial<Record<MessageKey, string | ((p: StringParams) => string)>> = 
   "register.check.number": "Namba au alama",
   "register.roleBuyerHint": "Weka dhamana, thibitisha uwasilishaji, toa malipo.",
   "register.roleSellerHint": "Tuma maagizo na ulipwe baada ya kutolewa.",
+  "register.roleCarrierHint": "Kubali kazi za usafirishaji na rekodi uchunguzi njiani.",
   "register.panel.kicker": "Venn · tabaka la uaminifu",
   "register.panel.title": "Fanya biashara na mgeni bila kumwamini.",
   "register.panel.point1.title": "Fedha zinasubiri kwenye dhamana",

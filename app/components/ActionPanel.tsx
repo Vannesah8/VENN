@@ -75,7 +75,7 @@ export function ActionPanel({
                     name="trackingNumber"
                     required
                     placeholder="1Z9V94X7K9"
-                    className="mt-1 w-full rounded-xl border border-[#dfece5] bg-white px-3 py-2 text-sm text-[#18352d]"
+                    className="mt-1 w-full rounded-xl border border-[#dfece5] bg-white px-3 py-2.5 text-base text-[#18352d] sm:text-sm"
                   />
                 </label>
 
@@ -85,7 +85,7 @@ export function ActionPanel({
                     name="carrierName"
                     required
                     placeholder="FedEx"
-                    className="mt-1 w-full rounded-xl border border-[#dfece5] bg-white px-3 py-2 text-sm text-[#18352d]"
+                    className="mt-1 w-full rounded-xl border border-[#dfece5] bg-white px-3 py-2.5 text-base text-[#18352d] sm:text-sm"
                   />
                 </label>
 
@@ -95,7 +95,7 @@ export function ActionPanel({
                     name="carrierId"
                     required
                     defaultValue=""
-                    className="mt-1 w-full rounded-xl border border-[#dfece5] bg-white px-3 py-2 text-sm text-[#18352d]"
+                    className="mt-1 w-full rounded-xl border border-[#dfece5] bg-white px-3 py-2.5 text-base text-[#18352d] sm:text-sm"
                   >
                     <option value="" disabled>
                       {t(lang, "form.selectCarrier")}
@@ -115,7 +115,7 @@ export function ActionPanel({
                       name="origin"
                       required
                       placeholder="Lagos"
-                      className="mt-1 w-full rounded-xl border border-[#dfece5] bg-white px-3 py-2 text-sm text-[#18352d]"
+                      className="mt-1 w-full rounded-xl border border-[#dfece5] bg-white px-3 py-2.5 text-base text-[#18352d] sm:text-sm"
                     />
                   </label>
                   <label className="text-sm text-[#5d736a]">
@@ -124,7 +124,7 @@ export function ActionPanel({
                       name="destination"
                       required
                       placeholder="Nairobi"
-                      className="mt-1 w-full rounded-xl border border-[#dfece5] bg-white px-3 py-2 text-sm text-[#18352d]"
+                      className="mt-1 w-full rounded-xl border border-[#dfece5] bg-white px-3 py-2.5 text-base text-[#18352d] sm:text-sm"
                     />
                   </label>
                 </div>
@@ -143,7 +143,7 @@ export function ActionPanel({
                       ? "Item arrived damaged"
                       : "Added context for the audit trail"
                   }
-                  className="mt-1 w-full rounded-xl border border-[#dfece5] bg-white px-3 py-2 text-sm text-[#18352d]"
+                  className="mt-1 w-full rounded-xl border border-[#dfece5] bg-white px-3 py-2.5 text-base text-[#18352d] sm:text-sm"
                 />
               </label>
             )}
@@ -151,7 +151,7 @@ export function ActionPanel({
             <button
               type="submit"
               disabled={pending}
-              className="mt-4 rounded-full bg-[#1e4d3d] px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-[#123a30] disabled:cursor-not-allowed disabled:opacity-60"
+              className="mt-4 w-full rounded-full bg-[#1e4d3d] px-5 py-3 text-sm font-semibold text-white transition hover:bg-[#123a30] disabled:cursor-not-allowed disabled:opacity-60 sm:w-auto"
             >
               {pending ? t(lang, "form.working") : item.label}
             </button>

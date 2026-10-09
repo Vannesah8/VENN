@@ -37,7 +37,7 @@ import {
   updateUserPrefs,
 } from "@/lib/transactions";
 
-const AUTH_ROLES: readonly EscrowRole[] = ["buyer", "seller"];
+const AUTH_ROLES: readonly EscrowRole[] = ["buyer", "seller", "carrier"];
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 function toActionState(error: unknown): ActionState {
@@ -216,7 +216,7 @@ export async function registerUser(
   }
 
   if (!(AUTH_ROLES as readonly string[]).includes(role)) {
-    return { error: "Choose a buyer or seller account", status: "invalid_input" };
+    return { error: "Choose a buyer, seller, or carrier account", status: "invalid_input" };
   }
 
   if (await getUserByEmail(email)) {

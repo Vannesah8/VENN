@@ -8,12 +8,19 @@ import { IDLE_ACTION_STATE } from "@/lib/action-state";
 import { roleLabel } from "@/lib/format";
 import { t, type LocalePrefs, type MessageKey } from "@/lib/i18n";
 
-const ROLES = ["buyer", "seller"] as const;
+const ROLES = ["buyer", "seller", "carrier"] as const;
 type Role = (typeof ROLES)[number];
 
 const ROLE_HINT: Record<Role, MessageKey> = {
   buyer: "register.roleBuyerHint",
   seller: "register.roleSellerHint",
+  carrier: "register.roleCarrierHint",
+};
+
+const ROLE_GLYPH: Record<Role, string> = {
+  buyer: "↓",
+  seller: "↑",
+  carrier: "→",
 };
 
 const STRENGTH_LABEL: readonly MessageKey[] = [
@@ -26,7 +33,7 @@ const STRENGTH_LABEL: readonly MessageKey[] = [
 const STRENGTH_TONE = ["#b45309", "#b45309", "#1e4d3d", "#1e4d3d"];
 
 const INPUT =
-  "w-full rounded-lg border border-[#dfece5] bg-white px-3 py-2.5 text-sm text-[#18352d] outline-none transition placeholder:text-[#a9b6af] focus:border-[#1e4d3d] focus:ring-4 focus:ring-[#1e4d3d]/10";
+  "w-full rounded-2xl border border-[#dfece5]/80 bg-white/85 px-4 py-3 text-base text-[#18352d] shadow-[inset_0_1px_0_rgba(255,255,255,0.6)] outline-none transition placeholder:text-[#7f8d88] focus:border-[#1e4d3d] focus:bg-white focus:ring-4 focus:ring-[#1e4d3d]/10";
 
 function toHandle(name: string): string {
   return name
@@ -58,30 +65,23 @@ function assess(password: string) {
 }
 
 function Field({
-  index,
   label,
   hint,
   children,
 }: {
-  index: string;
   label: string;
   hint?: string;
   children: ReactNode;
 }) {
   return (
-    <div className="grid grid-cols-[1.75rem_1fr] gap-x-3">
-      <span aria-hidden className="pt-2.5 font-mono text-[11px] text-[#b0bcb5]">
-        {index}
-      </span>
-      <div className="min-w-0">
-        <div className="flex items-baseline justify-between gap-3">
-          <span className="font-mono text-[11px] uppercase tracking-[0.18em] text-[#5d736a]">
-            {label}
-          </span>
-          {hint ? <span className="text-[10px] text-[#b0bcb5]">{hint}</span> : null}
-        </div>
-        <div className="mt-1.5">{children}</div>
+    <div className="min-w-0">
+      <div className="flex items-baseline justify-between gap-3">
+        <span className="text-[11px] uppercase tracking-[0.2em] text-[#dfece5]">
+          {label}
+        </span>
+        {hint ? <span className="text-[10px] text-[#d3dfe6]">{hint}</span> : null}
       </div>
+      <div className="mt-2">{children}</div>
     </div>
   );
 }
@@ -119,14 +119,14 @@ export function RegisterForm({ prefs }: { prefs: LocalePrefs }) {
       ) : null}
 
       <fieldset>
-        <legend className="font-mono text-[11px] uppercase tracking-[0.18em] text-[#5d736a]">
+        <legend className="text-[11px] uppercase tracking-[0.22em] text-[#dfece5]">
           {t(lang, "register.role")}
         </legend>
-        <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
+        <div className="mt-3 space-y-3">
           {ROLES.map((role) => (
             <label
               key={role}
-              className="flex cursor-pointer items-start gap-3 rounded-xl border border-[#dfece5] bg-white p-4 transition hover:border-[#bfd4c8] has-[:checked]:border-[#1e4d3d] has-[:checked]:bg-[#edf3ee]"
+              className="flex cursor-pointer items-start gap-3 rounded-2xl border border-white/10 bg-[#edf3ee]/80 p-4 text-[#173931] shadow-[0_10px_30px_rgba(8,17,20,0.12)] transition hover:border-[#bfd4c8] has-[:checked]:border-[#1e4d3d] has-[:checked]:bg-[#edf3ee]"
             >
               <input
                 type="radio"
@@ -137,15 +137,15 @@ export function RegisterForm({ prefs }: { prefs: LocalePrefs }) {
               />
               <span
                 aria-hidden
-                className="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-md border border-[#cfe0d6] font-mono text-sm text-[#1e4d3d]"
+                className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-md border border-[#cfe0d6] bg-white text-base text-[#1e4d3d]"
               >
-                {role === "buyer" ? "↓" : "↑"}
+                {ROLE_GLYPH[role]}
               </span>
               <span className="min-w-0">
-                <span className="block text-sm font-semibold text-[#18352d]">
+                <span className="block text-[1.1rem] font-medium text-[#18352d]">
                   {roleLabel(role, lang)}
                 </span>
-                <span className="mt-1 block text-xs leading-relaxed text-[#5d736a]">
+                <span className="mt-1 block text-sm leading-relaxed text-[#5d736a]">
                   {t(lang, ROLE_HINT[role])}
                 </span>
               </span>
@@ -154,7 +154,7 @@ export function RegisterForm({ prefs }: { prefs: LocalePrefs }) {
         </div>
       </fieldset>
 
-      <Field index="01" label={t(lang, "register.name")}>
+      <Field label={t(lang, "register.name")}>
         <input
           name="displayName"
           required
@@ -171,7 +171,7 @@ export function RegisterForm({ prefs }: { prefs: LocalePrefs }) {
         ) : null}
       </Field>
 
-      <Field index="02" label={t(lang, "login.email")}>
+      <Field label={t(lang, "login.email")}>
         <input
           name="email"
           type="email"
@@ -182,7 +182,7 @@ export function RegisterForm({ prefs }: { prefs: LocalePrefs }) {
         />
       </Field>
 
-      <Field index="03" label={t(lang, "register.password")}>
+      <Field label={t(lang, "register.password")}>
         <input
           name="password"
           type="password"
@@ -221,7 +221,7 @@ export function RegisterForm({ prefs }: { prefs: LocalePrefs }) {
         ) : null}
       </Field>
 
-      <Field index="04" label={t(lang, "register.phone")} hint={t(lang, "register.optional")}>
+      <Field label={t(lang, "register.phone")} hint={t(lang, "register.optional")}>
         <input
           name="phone"
           type="tel"
@@ -235,14 +235,14 @@ export function RegisterForm({ prefs }: { prefs: LocalePrefs }) {
       <button
         type="submit"
         disabled={pending}
-        className="w-full rounded-lg bg-[#1e4d3d] px-5 py-3 text-sm font-semibold text-white transition hover:bg-[#123a30] disabled:cursor-not-allowed disabled:opacity-60"
+        className="w-full rounded-2xl bg-[#1e4d3d] px-5 py-3.5 text-base font-medium text-white shadow-[0_14px_30px_rgba(24,53,45,0.25)] transition hover:bg-[#123a30] disabled:cursor-not-allowed disabled:opacity-60"
       >
         {pending ? t(lang, "register.creating") : t(lang, "register.create")}
       </button>
 
-      <p className="text-center text-sm text-[#5d736a]">
-        {t(lang, "register.signInLink")}{" "}
-        <Link href="/login" className="text-[#1e4d3d] hover:underline">
+      <p className="text-center text-base text-[#dfece5]">
+        {t(lang, "register.signInLink")} {" "}
+        <Link href="/login" className="font-medium text-white hover:underline">
           {t(lang, "login.signIn")}
         </Link>
       </p>

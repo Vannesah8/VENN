@@ -72,18 +72,18 @@ export default async function EscrowDetailPage({
         <StatusPill status={transaction.status} lang={prefs.lang} />
       </div>
 
-      <div className="grid gap-6 lg:grid-cols-[1.35fr_0.65fr]">
-        <div className="space-y-6">
-          <section className="rounded-3xl border border-[#dfece5] bg-white p-6 shadow-[0_16px_30px_rgba(24,53,45,0.05)]">
-            <div className="grid gap-4 md:grid-cols-3">
+      <div className="grid gap-4 sm:gap-6 lg:grid-cols-[1.35fr_0.65fr]">
+        <div className="space-y-4 sm:space-y-6">
+          <section className="rounded-3xl border border-[#dfece5] bg-white p-4 shadow-[0_16px_30px_rgba(24,53,45,0.05)] sm:p-6">
+            <div className="grid gap-3 sm:gap-4 md:grid-cols-3">
               {[
                 { label: "Buyer", value: transaction.buyerName },
                 { label: "Seller", value: transaction.sellerName },
                 { label: "Escrow balance", value: formatCents(transaction.amountCents, prefs) },
               ].map((cell) => (
-                <div key={cell.label} className="rounded-2xl border border-[#edf3ee] bg-[#f8faf8] p-4">
+                <div key={cell.label} className="rounded-2xl border border-[#edf3ee] bg-[#f8faf8] p-3 sm:p-4">
                   <p className="text-xs uppercase tracking-[0.2em] text-[#5d736a]">{cell.label}</p>
-                  <p className="mt-2 text-lg font-medium text-[#18352d]">{cell.value}</p>
+                  <p className="mt-1.5 text-base font-medium text-[#18352d] sm:mt-2 sm:text-lg">{cell.value}</p>
                 </div>
               ))}
             </div>
@@ -95,7 +95,7 @@ export default async function EscrowDetailPage({
             ) : null}
           </section>
 
-          <section className="rounded-3xl border border-[#dfece5] bg-white p-6 shadow-[0_16px_30px_rgba(24,53,45,0.05)]">
+          <section className="rounded-3xl border border-[#dfece5] bg-white p-4 shadow-[0_16px_30px_rgba(24,53,45,0.05)] sm:p-6">
             <div className="flex items-center justify-between">
               <h2 className="text-xl font-semibold text-[#18352d]">Ledger</h2>
               <p className="text-xs uppercase tracking-[0.16em] text-[#8b9d95]">
@@ -104,7 +104,7 @@ export default async function EscrowDetailPage({
             </div>
 
             {ledger.length === 0 ? (
-              <p className="mt-4 rounded-2xl border border-[#edf3ee] bg-[#f8faf8] p-4 text-sm text-[#5d736a]">
+              <p className="mt-4 rounded-2xl border border-[#edf3ee] bg-[#f8faf8] p-3 sm:p-4 text-sm text-[#5d736a]">
                 No money has moved for this escrow yet.
               </p>
             ) : (
@@ -115,7 +115,7 @@ export default async function EscrowDetailPage({
                     LEDGER_LABELS[entry.entryType] ?? entry.entryType.replace(/_/g, " ");
 
                   return (
-                    <li key={entry.id} className="rounded-2xl border border-[#edf3ee] bg-[#f8faf8] p-4">
+                    <li key={entry.id} className="rounded-2xl border border-[#edf3ee] bg-[#f8faf8] p-3 sm:p-4">
                       <div className="flex items-center justify-between gap-3">
                         <div className="min-w-0">
                           <p className="font-medium text-[#18352d]">
@@ -147,7 +147,7 @@ export default async function EscrowDetailPage({
             )}
           </section>
 
-          <section className="rounded-3xl border border-[#dfece5] bg-white p-6 shadow-[0_16px_30px_rgba(24,53,45,0.05)]">
+          <section className="rounded-3xl border border-[#dfece5] bg-white p-4 shadow-[0_16px_30px_rgba(24,53,45,0.05)] sm:p-6">
             <h2 className="text-xl font-semibold text-[#18352d]">Timeline</h2>
 
             <ol className="mt-5 space-y-5">
@@ -162,7 +162,7 @@ export default async function EscrowDetailPage({
                     ) : null}
                   </div>
 
-                  <div className="flex-1 rounded-2xl border border-[#edf3ee] bg-[#f8faf8] p-4">
+                  <div className="flex-1 rounded-2xl border border-[#edf3ee] bg-[#f8faf8] p-3 sm:p-4">
                     <div className="flex flex-wrap items-center justify-between gap-2">
                       <h3 className="font-medium text-[#18352d]">
                         {event.action === "created"
@@ -188,8 +188,8 @@ export default async function EscrowDetailPage({
           </section>
         </div>
 
-        <aside className="space-y-6">
-          <section className="rounded-3xl border border-[#dfece5] bg-white p-6 shadow-[0_16px_30px_rgba(24,53,45,0.05)]">
+        <aside className="space-y-4 sm:space-y-6">
+          <section className="rounded-3xl border border-[#dfece5] bg-white p-4 shadow-[0_16px_30px_rgba(24,53,45,0.05)] sm:p-6">
             <h2 className="text-sm text-[#5d736a]">Shipment</h2>
 
             {transaction.trackingNumber ? (
@@ -219,7 +219,7 @@ export default async function EscrowDetailPage({
             )}
           </section>
 
-          <section className="rounded-3xl border border-[#dfece5] bg-white p-6 shadow-[0_16px_30px_rgba(24,53,45,0.05)]">
+          <section className="rounded-3xl border border-[#dfece5] bg-white p-4 shadow-[0_16px_30px_rgba(24,53,45,0.05)] sm:p-6">
             <div className="flex items-center justify-between">
               <h2 className="text-xl font-semibold text-[#18352d]">Scans</h2>
               <p className="text-xs uppercase tracking-[0.16em] text-[#8b9d95]">
@@ -228,7 +228,7 @@ export default async function EscrowDetailPage({
             </div>
 
             {scans.length === 0 ? (
-              <p className="mt-4 rounded-2xl border border-[#edf3ee] bg-[#f8faf8] p-4 text-sm text-[#5d736a]">
+              <p className="mt-4 rounded-2xl border border-[#edf3ee] bg-[#f8faf8] p-3 sm:p-4 text-sm text-[#5d736a]">
                 No carrier scans yet. They appear here as the parcel moves.
               </p>
             ) : (
@@ -266,7 +266,7 @@ export default async function EscrowDetailPage({
             )}
           </section>
 
-          <section className="rounded-3xl border border-[#dfece5] bg-white p-6 shadow-[0_16px_30px_rgba(24,53,45,0.05)]">
+          <section className="rounded-3xl border border-[#dfece5] bg-white p-4 shadow-[0_16px_30px_rgba(24,53,45,0.05)] sm:p-6">
             <h2 className="text-xl font-semibold text-[#18352d]">Available actions</h2>
             <p className="mt-2 text-sm text-[#5d736a]">
               {party ? partySentence(party, prefs.lang) : "You are not a party to this transaction."}

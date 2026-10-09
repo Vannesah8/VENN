@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import { getPrefsFromCookies } from "@/lib/prefs";
 import "./globals.css";
@@ -16,6 +16,13 @@ const geistMono = Geist_Mono({
 export const metadata: Metadata = {
   title: "Venn | Trust-first social commerce",
   description: "Escrow, delivery tracking, and dispute protection for safe social-media transactions.",
+};
+
+export const viewport: Viewport = {
+  width: "device-width",
+  initialScale: 1,
+  viewportFit: "cover",
+  themeColor: "#f5f7f3",
 };
 
 export default async function RootLayout({ children }: LayoutProps<"/">) {

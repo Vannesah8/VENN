@@ -48,7 +48,7 @@ export default async function DashboardPage() {
       eyebrow="Operations"
       title="Marketplace workspace"
     >
-      <div className="grid gap-4 md:grid-cols-4">
+      <div className="grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-4">
         {[
           { label: "Escrow held", value: formatCents(stats.heldCents, prefs) },
           { label: "Released to sellers", value: formatCents(stats.releasedCents, prefs) },
@@ -57,16 +57,18 @@ export default async function DashboardPage() {
         ].map((card) => (
           <div
             key={card.label}
-            className="rounded-2xl border border-[#dfece5] bg-white p-5 shadow-[0_10px_20px_rgba(24,53,45,0.04)]"
+            className="rounded-2xl border border-[#dfece5] bg-white p-4 shadow-[0_10px_20px_rgba(24,53,45,0.04)] sm:p-5"
           >
-            <p className="text-sm text-[#5d736a]">{card.label}</p>
-            <p className="mt-4 text-3xl font-semibold text-[#18352d]">{card.value}</p>
+            <p className="text-xs text-[#5d736a] sm:text-sm">{card.label}</p>
+            <p className="mt-2 text-2xl font-semibold text-[#18352d] sm:mt-4 sm:text-3xl">
+              {card.value}
+            </p>
           </div>
         ))}
       </div>
 
-      <div className="mt-8 grid gap-6 lg:grid-cols-[1.25fr_0.75fr]">
-        <section className="rounded-3xl border border-[#dfece5] bg-white p-6 shadow-[0_16px_30px_rgba(24,53,45,0.05)]">
+      <div className="mt-6 grid gap-4 sm:mt-8 sm:gap-6 lg:grid-cols-[1.25fr_0.75fr]">
+        <section className="rounded-3xl border border-[#dfece5] bg-white p-4 shadow-[0_16px_30px_rgba(24,53,45,0.05)] sm:p-6">
           <div className="mb-5 flex items-center justify-between">
             <h2 className="text-xl font-semibold text-[#18352d]">Your transactions</h2>
             <Link href="/escrow" className="text-sm text-[#1e4d3d] hover:underline">
@@ -105,14 +107,14 @@ export default async function DashboardPage() {
           )}
         </section>
 
-        <div className="space-y-6">
+        <div className="space-y-4 sm:space-y-6">
           <ConnectCard prefs={prefs} />
 
-          <section className="rounded-3xl border border-[#dfece5] bg-white p-6 shadow-[0_16px_30px_rgba(24,53,45,0.05)]">
-            <div className="flex items-end justify-between gap-3">
+          <section className="rounded-3xl border border-[#dfece5] bg-white p-4 shadow-[0_16px_30px_rgba(24,53,45,0.05)] sm:p-6">
+            <div className="flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between sm:gap-3">
               <div>
                 <p className="text-sm text-[#5d736a]">Wallet balance</p>
-                <p className="mt-2 text-3xl font-semibold text-[#1e4d3d]">
+                <p className="mt-1 text-2xl font-semibold text-[#1e4d3d] sm:mt-2 sm:text-3xl">
                   {formatCents(balance, prefs)}
                 </p>
               </div>
@@ -126,7 +128,7 @@ export default async function DashboardPage() {
             </div>
           </section>
 
-          <section className="rounded-3xl border border-[#dfece5] bg-white p-6 shadow-[0_16px_30px_rgba(24,53,45,0.05)]">
+          <section className="rounded-3xl border border-[#dfece5] bg-white p-4 shadow-[0_16px_30px_rgba(24,53,45,0.05)] sm:p-6">
             <h2 className="text-xl font-semibold text-[#18352d]">Needs your attention</h2>
 
             {actionQueue.length === 0 ? (
@@ -152,7 +154,7 @@ export default async function DashboardPage() {
             )}
           </section>
 
-          <section className="rounded-3xl border border-[#dfece5] bg-white p-6 shadow-[0_16px_30px_rgba(24,53,45,0.05)]">
+          <section className="rounded-3xl border border-[#dfece5] bg-white p-4 shadow-[0_16px_30px_rgba(24,53,45,0.05)] sm:p-6">
             <h2 className="text-xl font-semibold text-[#18352d]">Recent updates</h2>
 
             {notifications.length === 0 ? (
@@ -178,7 +180,7 @@ export default async function DashboardPage() {
           </section>
 
           {actor?.role === "buyer" ? (
-            <section className="rounded-3xl border border-[#dfece5] bg-white p-6 shadow-[0_16px_30px_rgba(24,53,45,0.05)]">
+            <section className="rounded-3xl border border-[#dfece5] bg-white p-4 shadow-[0_16px_30px_rgba(24,53,45,0.05)] sm:p-6">
               <h2 className="text-xl font-semibold text-[#18352d]">Fund a new escrow</h2>
               <p className="mt-2 text-sm text-[#5d736a]">
                 Funds move out of your wallet and stay held until you confirm delivery. Signed in as{" "}

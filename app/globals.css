@@ -21,13 +21,50 @@
 
 html {
   scroll-behavior: smooth;
+  -webkit-text-size-adjust: 100%;
 }
 
 body {
   min-height: 100vh;
-  background: linear-gradient(180deg, #f7f9f7 0%, #eef4f0 100%);
   color: var(--foreground);
   font-family: Arial, Helvetica, sans-serif;
+  -webkit-tap-highlight-color: transparent;
+  overflow-x: hidden;
+  background:
+    radial-gradient(1100px 620px at 12% -12%, #e2efe7 0%, transparent 58%),
+    radial-gradient(900px 520px at 102% -4%, #eef4e3 0%, transparent 55%),
+    linear-gradient(180deg, #f7f9f7 0%, #eef4f0 100%);
+  background-attachment: fixed;
+}
+
+.auth-page {
+  position: relative;
+  isolation: isolate;
+  background-color: #081c2b;
+  background-image:
+    linear-gradient(135deg, rgba(4, 16, 25, 0.76), rgba(11, 31, 42, 0.52)),
+    url("/auth-bg.svg");
+  background-size: cover;
+  background-position: center;
+  background-repeat: no-repeat;
+}
+
+.auth-page::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background:
+    radial-gradient(circle at top, rgba(126, 249, 217, 0.18), transparent 30%),
+    linear-gradient(180deg, rgba(7, 22, 32, 0.18), rgba(7, 22, 32, 0.26));
+  pointer-events: none;
+}
+
+.auth-card {
+  position: relative;
+  z-index: 1;
+  background: rgba(7, 31, 41, 0.52);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  box-shadow: 0 18px 45px rgba(1, 12, 18, 0.42);
 }
 
 a {
@@ -36,4 +73,87 @@ a {
 
 * {
   box-sizing: border-box;
+}
+
+@keyframes venn-float {
+  0%,
+  100% {
+    transform: translate3d(0, 0, 0) scale(1);
+  }
+  33% {
+    transform: translate3d(7%, -9%, 0) scale(1.1);
+  }
+  66% {
+    transform: translate3d(-8%, 6%, 0) scale(0.94);
+  }
+}
+
+@keyframes venn-grid {
+  from {
+    background-position: 0 0;
+  }
+  to {
+    background-position: 46px 46px;
+  }
+}
+
+@keyframes venn-sheen {
+  from {
+    background-position: 200% 0;
+  }
+  to {
+    background-position: -200% 0;
+  }
+}
+
+@keyframes venn-rise {
+  from {
+    opacity: 0;
+    transform: translateY(16px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.venn-blob {
+  position: absolute;
+  border-radius: 9999px;
+  filter: blur(70px);
+  opacity: 0.55;
+  will-change: transform;
+  animation: venn-float 20s ease-in-out infinite;
+}
+
+.venn-grid {
+  background-image:
+    linear-gradient(rgba(30, 77, 61, 0.07) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(30, 77, 61, 0.07) 1px, transparent 1px);
+  background-size: 46px 46px;
+  animation: venn-grid 38s linear infinite;
+}
+
+.venn-sheen {
+  background: linear-gradient(
+    100deg,
+    rgba(30, 77, 61, 0.14) 0%,
+    rgba(30, 77, 61, 0) 45%,
+    rgba(30, 77, 61, 0.14) 90%
+  );
+  background-size: 200% 100%;
+  animation: venn-sheen 6s ease-in-out infinite;
+}
+
+.venn-rise {
+  animation: venn-rise 0.7s cubic-bezier(0.2, 0.7, 0.2, 1) both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .venn-blob,
+  .venn-grid,
+  .venn-sheen,
+  .venn-rise {
+    animation: none;
+  }
 }

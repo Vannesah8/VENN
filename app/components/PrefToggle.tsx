@@ -35,7 +35,7 @@ export function PrefToggle({ prefs }: { prefs: LocalePrefs }) {
         value={prefs.lang}
         disabled={isPending}
         onChange={(event) => change({ lang: event.target.value as Lang })}
-        className="rounded-full border border-[#dfece5] bg-[#f8faf8] px-3 py-1.5 text-xs font-medium text-[#18352d]"
+        className="rounded-full border border-[#dfece5] bg-[#f8faf8] px-3 py-2 text-base font-medium text-[#18352d] sm:py-1.5 sm:text-xs"
       >
         {LANGS.map((lang) => (
           <option key={lang} value={lang}>
@@ -49,7 +49,7 @@ export function PrefToggle({ prefs }: { prefs: LocalePrefs }) {
         value={prefs.currency}
         disabled={isPending}
         onChange={(event) => change({ currency: event.target.value as Currency })}
-        className="rounded-full border border-[#dfece5] bg-[#f8faf8] px-3 py-1.5 text-xs font-medium text-[#18352d]"
+        className="rounded-full border border-[#dfece5] bg-[#f8faf8] px-3 py-2 text-base font-medium text-[#18352d] sm:py-1.5 sm:text-xs"
       >
         {CURRENCIES.map((currency) => (
           <option key={currency} value={currency}>

@@ -46,7 +46,7 @@ export function OpenEscrowForm({
           name="sellerId"
           required
           defaultValue=""
-          className="mt-1 w-full rounded-xl border border-[#dfece5] bg-white px-3 py-2 text-sm text-[#18352d]"
+          className="mt-1 w-full rounded-xl border border-[#dfece5] bg-white px-3 py-2.5 text-base text-[#18352d] sm:text-sm"
         >
           <option value="" disabled>
             {t(lang, "form.selectSeller")}
@@ -65,7 +65,7 @@ export function OpenEscrowForm({
           name="itemName"
           required
           placeholder="Vintage camera lens"
-          className="mt-1 w-full rounded-xl border border-[#dfece5] bg-white px-3 py-2 text-sm text-[#18352d]"
+          className="mt-1 w-full rounded-xl border border-[#dfece5] bg-white px-3 py-2.5 text-base text-[#18352d] sm:text-sm"
         />
       </label>
 
@@ -76,14 +76,14 @@ export function OpenEscrowForm({
           required
           inputMode="decimal"
           placeholder="1240.00"
-          className="mt-1 w-full rounded-xl border border-[#dfece5] bg-white px-3 py-2 text-sm text-[#18352d]"
+          className="mt-1 w-full rounded-xl border border-[#dfece5] bg-white px-3 py-2.5 text-base text-[#18352d] sm:text-sm"
         />
       </label>
 
       <button
         type="submit"
         disabled={pending}
-        className="rounded-full bg-[#1e4d3d] px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-[#123a30] disabled:cursor-not-allowed disabled:opacity-60"
+        className="w-full rounded-full bg-[#1e4d3d] px-5 py-3 text-sm font-semibold text-white transition hover:bg-[#123a30] disabled:cursor-not-allowed disabled:opacity-60 sm:w-auto"
       >
         {pending ? t(lang, "form.fundingEscrow") : t(lang, "form.fundEscrow")}
       </button>

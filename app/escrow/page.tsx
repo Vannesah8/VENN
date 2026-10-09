@@ -51,24 +51,24 @@ export default async function EscrowIndexPage({
       <form
         role="search"
         action="/escrow"
-        className="mb-4 flex flex-wrap items-center gap-2"
+        className="mb-4 flex flex-col gap-2 sm:flex-row sm:items-center"
       >
         <input
           type="search"
           name="q"
           defaultValue={query ?? ""}
           placeholder="Search item, tracking, buyer or seller"
-          className="w-full max-w-sm rounded-full border border-[#dfece5] bg-white px-5 py-2 text-sm text-[#18352d] outline-none transition focus:border-[#1e4d3d]"
+          className="w-full rounded-full border border-[#dfece5] bg-white px-5 py-2.5 text-base text-[#18352d] outline-none transition focus:border-[#1e4d3d] sm:max-w-sm sm:text-sm"
         />
         <button
           type="submit"
-          className="rounded-full border border-[#1e4d3d] bg-[#1e4d3d] px-5 py-2 text-sm font-semibold text-white transition hover:bg-[#18352d]"
+          className="w-full rounded-full border border-[#1e4d3d] bg-[#1e4d3d] px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-[#18352d] sm:w-auto"
         >
           Search
         </button>
       </form>
 
-      <div className="flex flex-wrap gap-2">
+      <div className="-mx-4 flex gap-2 overflow-x-auto px-4 pb-1 [scrollbar-width:none] sm:mx-0 sm:flex-wrap sm:px-0 sm:pb-0 [&::-webkit-scrollbar]:hidden">
         {FILTERS.map((entry) => (
           <Link
             key={entry.key}
@@ -81,7 +81,7 @@ export default async function EscrowIndexPage({
                   ? { filter: entry.key, q: query }
                   : { filter: entry.key },
             ).toString()}`}
-            className={`rounded-full border px-4 py-2 text-sm transition ${
+            className={`shrink-0 whitespace-nowrap rounded-full border px-4 py-2 text-sm transition ${
               active === entry.key
                 ? "border-[#1e4d3d] bg-[#1e4d3d] text-white"
                 : "border-[#dfece5] bg-white text-[#18352d] hover:border-[#1e4d3d]"
@@ -97,12 +97,12 @@ export default async function EscrowIndexPage({
           No transactions match this filter.
         </p>
       ) : (
-        <div className="grid gap-4 md:grid-cols-2">
+        <div className="grid gap-3 sm:gap-4 md:grid-cols-2">
           {transactions.map((transaction) => (
             <Link
               key={transaction.id}
               href={`/escrow/${transaction.id}`}
-              className="rounded-3xl border border-[#dfece5] bg-white p-6 shadow-[0_16px_30px_rgba(24,53,45,0.05)] transition hover:border-[#bfd4c8]"
+              className="rounded-3xl border border-[#dfece5] bg-white p-4 shadow-[0_16px_30px_rgba(24,53,45,0.05)] transition hover:border-[#bfd4c8] sm:p-6"
             >
               <div className="flex items-start justify-between gap-3">
                 <div className="min-w-0">
@@ -114,22 +114,22 @@ export default async function EscrowIndexPage({
                 <StatusPill status={transaction.status} lang={prefs.lang} />
               </div>
 
-              <dl className="mt-5 grid grid-cols-2 gap-3 text-sm">
-                <div className="rounded-2xl bg-[#f8faf8] p-3">
+              <dl className="mt-4 grid grid-cols-2 gap-2 text-sm sm:mt-5 sm:gap-3">
+                <div className="rounded-2xl bg-[#f8faf8] p-2.5 sm:p-3">
                   <dt className="text-xs uppercase tracking-[0.16em] text-[#5d736a]">Buyer</dt>
                   <dd className="mt-1 font-medium text-[#18352d]">{transaction.buyerName}</dd>
                 </div>
-                <div className="rounded-2xl bg-[#f8faf8] p-3">
+                <div className="rounded-2xl bg-[#f8faf8] p-2.5 sm:p-3">
                   <dt className="text-xs uppercase tracking-[0.16em] text-[#5d736a]">Seller</dt>
                   <dd className="mt-1 font-medium text-[#18352d]">{transaction.sellerName}</dd>
                 </div>
-                <div className="rounded-2xl bg-[#f8faf8] p-3">
+                <div className="rounded-2xl bg-[#f8faf8] p-2.5 sm:p-3">
                   <dt className="text-xs uppercase tracking-[0.16em] text-[#5d736a]">Escrow</dt>
                   <dd className="mt-1 font-medium text-[#18352d]">
                     {formatCents(transaction.amountCents, prefs)}
                   </dd>
                 </div>
-                <div className="rounded-2xl bg-[#f8faf8] p-3">
+                <div className="rounded-2xl bg-[#f8faf8] p-2.5 sm:p-3">
                   <dt className="text-xs uppercase tracking-[0.16em] text-[#5d736a]">Updated</dt>
                   <dd className="mt-1 font-medium text-[#18352d]">
                     {formatDate(transaction.updatedAt, prefs)}
@@ -155,7 +155,7 @@ export default async function EscrowIndexPage({
                 <Link
                   key={item.id}
                   href={`/escrow/${item.id}`}
-                  className="rounded-3xl border border-[#dfece5] bg-white p-6 shadow-[0_16px_30px_rgba(24,53,45,0.05)] transition hover:border-[#bfd4c8]"
+                  className="rounded-3xl border border-[#dfece5] bg-white p-4 shadow-[0_16px_30px_rgba(24,53,45,0.05)] transition hover:border-[#bfd4c8] sm:p-6"
                 >
                   <div className="flex items-start justify-between gap-3">
                     <div className="min-w-0">
@@ -166,22 +166,22 @@ export default async function EscrowIndexPage({
                     </div>
                     <StatusPill status={item.status as EscrowStatus} lang={prefs.lang} />
                   </div>
-                  <dl className="mt-5 grid grid-cols-2 gap-3 text-sm">
-                    <div className="rounded-2xl bg-[#f8faf8] p-3">
+                  <dl className="mt-4 grid grid-cols-2 gap-2 text-sm sm:mt-5 sm:gap-3">
+                    <div className="rounded-2xl bg-[#f8faf8] p-2.5 sm:p-3">
                       <dt className="text-xs uppercase tracking-[0.16em] text-[#5d736a]">Buyer</dt>
                       <dd className="mt-1 font-medium text-[#18352d]">{item.buyerName}</dd>
                     </div>
-                    <div className="rounded-2xl bg-[#f8faf8] p-3">
+                    <div className="rounded-2xl bg-[#f8faf8] p-2.5 sm:p-3">
                       <dt className="text-xs uppercase tracking-[0.16em] text-[#5d736a]">Seller</dt>
                       <dd className="mt-1 font-medium text-[#18352d]">{item.sellerName}</dd>
                     </div>
-                    <div className="rounded-2xl bg-[#f8faf8] p-3">
+                    <div className="rounded-2xl bg-[#f8faf8] p-2.5 sm:p-3">
                       <dt className="text-xs uppercase tracking-[0.16em] text-[#5d736a]">Escrow</dt>
                       <dd className="mt-1 font-medium text-[#18352d]">
                         {formatCents(item.amountCents, prefs)}
                       </dd>
                     </div>
-                    <div className="rounded-2xl bg-[#f8faf8] p-3">
+                    <div className="rounded-2xl bg-[#f8faf8] p-2.5 sm:p-3">
                       <dt className="text-xs uppercase tracking-[0.16em] text-[#5d736a]">Updated</dt>
                       <dd className="mt-1 font-medium text-[#18352d]">
                         {formatDate(new Date(item.updatedAt), prefs)}
